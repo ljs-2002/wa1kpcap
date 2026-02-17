@@ -1,0 +1,14 @@
+name: tls_ext_supported_groups
+fields:
+  - name: groups_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: groups_count
+    type: computed
+    expression: groups_length / 2
+  - name: groups
+    type: counted_list
+    count_field: groups_count
+    size: 2
+    format: uint

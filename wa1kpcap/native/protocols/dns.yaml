@@ -1,0 +1,29 @@
+name: dns
+fields:
+  - name: transaction_id
+    type: fixed
+    size: 2
+    format: uint
+  - name: flags
+    type: fixed
+    size: 2
+    format: uint
+  - name: question_count
+    type: fixed
+    size: 2
+    format: uint
+  - name: answer_count
+    type: fixed
+    size: 2
+    format: uint
+  - name: authority_count
+    type: fixed
+    size: 2
+    format: uint
+  - name: additional_count
+    type: fixed
+    size: 2
+    format: uint
+  - name: response_code
+    type: computed
+    expression: flags - flags / 16 * 16

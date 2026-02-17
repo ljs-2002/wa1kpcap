@@ -1,0 +1,5 @@
+name: nflog
+fields:
+  - name: payload
+    type: hardcoded
+    parser: nflog_payload

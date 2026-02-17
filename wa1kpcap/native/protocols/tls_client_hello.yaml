@@ -1,0 +1,44 @@
+name: tls_client_hello
+fields:
+  - name: client_version_major
+    type: fixed
+    size: 1
+    format: uint
+  - name: client_version_minor
+    type: fixed
+    size: 1
+    format: uint
+  - name: random
+    type: fixed
+    size: 32
+    format: bytes
+  - name: session_id
+    type: length_prefixed
+    length_size: 1
+    format: bytes
+  - name: cipher_suites_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: cipher_suites_count
+    type: computed
+    expression: cipher_suites_length / 2
+  - name: cipher_suites
+    type: counted_list
+    count_field: cipher_suites_count
+    size: 2
+    format: uint
+  - name: compression_methods
+    type: length_prefixed
+    length_size: 1
+    format: bytes
+  - name: extensions
+    type: ext_list
+    total_length_size: 2
+    type_size: 2
+    length_size: 2
+    type_mapping:
+      0x0000: tls_ext_sni
+      0x000A: tls_ext_supported_groups
+      0x000D: tls_ext_signature_algorithms
+      0x0010: tls_ext_alpn

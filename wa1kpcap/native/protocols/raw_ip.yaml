@@ -1,0 +1,16 @@
+name: raw_ip
+fields:
+  - name: version_nibble
+    type: bitfield
+    group_size: 1
+    fields:
+      - name: version
+        bits: 4
+      - name: _pad
+        bits: 4
+
+next_protocol:
+  field: version
+  mapping:
+    4: ipv4
+    6: ipv6

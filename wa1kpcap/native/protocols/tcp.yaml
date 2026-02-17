@@ -1,0 +1,63 @@
+name: tcp
+header_size_field: header_length
+fields:
+  - name: src_port
+    type: fixed
+    size: 2
+    format: uint
+  - name: dst_port
+    type: fixed
+    size: 2
+    format: uint
+  - name: seq
+    type: fixed
+    size: 4
+    format: uint
+  - name: ack_num
+    type: fixed
+    size: 4
+    format: uint
+  - name: data_offset_flags
+    type: bitfield
+    group_size: 2
+    fields:
+      - name: data_offset
+        bits: 4
+      - name: reserved
+        bits: 3
+      - name: ns
+        bits: 1
+      - name: cwr
+        bits: 1
+      - name: ece
+        bits: 1
+      - name: urg
+        bits: 1
+      - name: ack
+        bits: 1
+      - name: psh
+        bits: 1
+      - name: rst
+        bits: 1
+      - name: syn
+        bits: 1
+      - name: fin
+        bits: 1
+  - name: window
+    type: fixed
+    size: 2
+    format: uint
+  - name: checksum
+    type: fixed
+    size: 2
+    format: uint
+  - name: urgent_pointer
+    type: fixed
+    size: 2
+    format: uint
+  - name: header_length
+    type: computed
+    expression: data_offset * 4
+  - name: flags
+    type: computed
+    expression: fin + syn * 2 + rst * 4 + psh * 8 + ack * 16 + urg * 32 + ece * 64 + cwr * 128

@@ -1,0 +1,16 @@
+name: tls_handshake
+fields:
+  - name: handshake_type
+    type: fixed
+    size: 1
+    format: uint
+  - name: handshake_length
+    type: fixed
+    size: 3
+    format: uint
+
+next_protocol:
+  field: handshake_type
+  mapping:
+    1: tls_client_hello
+    2: tls_server_hello

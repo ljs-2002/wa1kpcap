@@ -1,0 +1,11 @@
+name: bsd_loopback
+fields:
+  - name: af
+    type: hardcoded
+    parser: bsd_loopback_af
+
+next_protocol:
+  field: af
+  mapping:
+    0x0800: ipv4
+    0x86DD: ipv6

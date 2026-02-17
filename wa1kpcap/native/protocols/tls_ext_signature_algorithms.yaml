@@ -1,0 +1,14 @@
+name: tls_ext_signature_algorithms
+fields:
+  - name: algorithms_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: algorithms_count
+    type: computed
+    expression: algorithms_length / 2
+  - name: algorithms
+    type: counted_list
+    count_field: algorithms_count
+    size: 2
+    format: uint

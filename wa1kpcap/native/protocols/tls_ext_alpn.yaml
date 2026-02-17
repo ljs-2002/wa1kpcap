@@ -1,0 +1,9 @@
+name: tls_ext_alpn
+fields:
+  - name: alpn_list_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: protocols
+    type: hardcoded
+    parser: alpn_list

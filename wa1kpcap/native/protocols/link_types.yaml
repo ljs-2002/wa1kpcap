@@ -1,0 +1,9 @@
+# Link type (DLT) to protocol mapping
+link_types:
+  0: bsd_loopback      # DLT_NULL
+  1: ethernet           # DLT_EN10MB
+  101: raw_ip           # DLT_RAW
+  108: bsd_loopback     # DLT_LOOP
+  113: linux_sll        # DLT_LINUX_SLL
+  239: nflog            # DLT_NFLOG
+  276: linux_sll2       # DLT_LINUX_SLL2

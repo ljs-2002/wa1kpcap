@@ -1,0 +1,24 @@
+name: vlan
+fields:
+  - name: tci
+    type: bitfield
+    group_size: 2
+    fields:
+      - name: priority
+        bits: 3
+      - name: dei
+        bits: 1
+      - name: vlan_id
+        bits: 12
+  - name: ether_type
+    type: fixed
+    size: 2
+    format: uint
+
+next_protocol:
+  field: ether_type
+  mapping:
+    0x0800: ipv4
+    0x86DD: ipv6
+    0x0806: arp
+    0x8100: vlan

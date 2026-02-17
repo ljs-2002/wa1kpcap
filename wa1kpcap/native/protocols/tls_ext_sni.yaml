@@ -1,0 +1,14 @@
+name: tls_ext_sni
+fields:
+  - name: server_name_list_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: name_type
+    type: fixed
+    size: 1
+    format: uint
+  - name: server_name
+    type: length_prefixed
+    length_size: 2
+    format: string

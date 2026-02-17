@@ -1,0 +1,23 @@
+name: tls_record
+fields:
+  - name: content_type
+    type: fixed
+    size: 1
+    format: uint
+  - name: version_major
+    type: fixed
+    size: 1
+    format: uint
+  - name: version_minor
+    type: fixed
+    size: 1
+    format: uint
+  - name: record_length
+    type: fixed
+    size: 2
+    format: uint
+
+next_protocol:
+  field: content_type
+  mapping:
+    22: tls_handshake

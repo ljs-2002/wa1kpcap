@@ -1,0 +1,71 @@
+name: ipv4
+header_size_field: header_length
+total_length_field: total_length
+fields:
+  - name: ver_ihl
+    type: bitfield
+    group_size: 1
+    fields:
+      - name: version
+        bits: 4
+      - name: ihl
+        bits: 4
+  - name: dscp_ecn
+    type: bitfield
+    group_size: 1
+    fields:
+      - name: dscp
+        bits: 6
+      - name: ecn
+        bits: 2
+  - name: total_length
+    type: fixed
+    size: 2
+    format: uint
+  - name: identification
+    type: fixed
+    size: 2
+    format: uint
+  - name: flags_offset
+    type: bitfield
+    group_size: 2
+    fields:
+      - name: reserved_flag
+        bits: 1
+      - name: df
+        bits: 1
+      - name: mf
+        bits: 1
+      - name: fragment_offset
+        bits: 13
+  - name: ttl
+    type: fixed
+    size: 1
+    format: uint
+  - name: protocol
+    type: fixed
+    size: 1
+    format: uint
+  - name: checksum
+    type: fixed
+    size: 2
+    format: uint
+  - name: src
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: dst
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: header_length
+    type: computed
+    expression: ihl * 4
+
+next_protocol:
+  field: protocol
+  mapping:
+    6: tcp
+    17: udp
+    1: icmp
+    58: icmpv6
