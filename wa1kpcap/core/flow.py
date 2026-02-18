@@ -244,10 +244,8 @@ class Flow:
     tcp_state: TCPState = TCPState.CLOSED
     tcp_state_reverse: TCPState = TCPState.CLOSED
 
-    # Protocol extraction results
-    tls: object | None = None  # TLSInfo (avoid circular import)
-    http: object | None = None  # HTTPInfo
-    dns: object | None = None   # DNSInfo
+    # Protocol extraction results — stored in layers dict
+    layers: dict = field(default_factory=dict)
 
     # Features
     features: object | None = None  # FlowFeatures
@@ -287,6 +285,31 @@ class Flow:
     def __post_init__(self):
         if self.start_time == 0.0:
             self.start_time = time.time()
+
+    # Protocol property aliases — source of truth is self.layers
+    @property
+    def tls(self):
+        return self.layers.get('tls_record')
+    @tls.setter
+    def tls(self, v):
+        if v is not None: self.layers['tls_record'] = v
+        else: self.layers.pop('tls_record', None)
+
+    @property
+    def http(self):
+        return self.layers.get('http')
+    @http.setter
+    def http(self, v):
+        if v is not None: self.layers['http'] = v
+        else: self.layers.pop('http', None)
+
+    @property
+    def dns(self):
+        return self.layers.get('dns')
+    @dns.setter
+    def dns(self, v):
+        if v is not None: self.layers['dns'] = v
+        else: self.layers.pop('dns', None)
 
     def register_incremental_feature(self, name: str, processor) -> None:
         """
@@ -961,22 +984,26 @@ class Flow:
         elif protocol_num == 132:  # SCTP
             protocol_stack.append("SCTP")
 
-        # Application layer
-        if self.tls:
-            protocol_stack.append("TLS")
-            # Check ALPN for HTTPS indication
-            if hasattr(self.tls, 'alpn') and self.tls.alpn:
-                # ALPN values like "h2", "http/1.1", "http/1.0" indicate HTTPS
-                https_protocols = {"h2", "http/1.1", "http/1.0", "http/0.9", "http"}
-                if any(alpn.lower() in https_protocols or alpn.lower().startswith("http/")
-                       for alpn in self.tls.alpn):
-                    protocol_stack.append("HTTPS")
+        # Application layer — dynamic from self.layers
+        _NETWORK_TRANSPORT = {'ethernet', 'ipv4', 'ipv6', 'tcp', 'udp', 'icmp'}
+        for layer_name in self.layers:
+            if layer_name in _NETWORK_TRANSPORT:
+                continue
 
-        if self.http:
-            protocol_stack.append("HTTP")
+            display_name = layer_name.upper()
 
-        if self.dns:
-            protocol_stack.append("DNS")
+            # TLS special case: check ALPN for HTTPS indication
+            if layer_name == 'tls_record':
+                display_name = "TLS"
+                protocol_stack.append(display_name)
+                tls_info = self.layers[layer_name]
+                if hasattr(tls_info, 'alpn') and tls_info.alpn:
+                    https_protocols = {"h2", "http/1.1", "http/1.0", "http/0.9", "http"}
+                    if any(alpn.lower() in https_protocols or alpn.lower().startswith("http/")
+                           for alpn in tls_info.alpn):
+                        protocol_stack.append("HTTPS")
+            else:
+                protocol_stack.append(display_name)
 
         self.ext_protocol = protocol_stack
         return protocol_stack
@@ -1033,18 +1060,24 @@ class FlowManager:
         """Get existing flow or create new one for this packet.
 
         Uses canonical tuple key for single-lookup bidirectional matching.
+        Defers FlowKey creation until a new flow is actually needed.
         """
-        canonical, key = self._make_flow_key(pkt)
-        if key is None:
+        # Extract canonical tuple and raw fields (no FlowKey yet)
+        result = self._extract_flow_tuple(pkt)
+        if result is None:
             return None
+
+        canonical, src_ip, dst_ip, src_port, dst_port, protocol = result
 
         # Single lookup with canonical tuple key
         flow = self._flows.get(canonical)
 
         if flow is None:
-            # New flow
+            # New flow — only now create FlowKey
             if len(self._flows) >= self.config.max_flows:
                 return None
+            key = FlowKey(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
+                          dst_port=dst_port, protocol=protocol)
             flow = Flow(key=key, start_time=pkt.timestamp, _verbose=True, _save_raw=False)
             flow._canonical_key = canonical
             self._flows[canonical] = flow
@@ -1053,11 +1086,11 @@ class FlowManager:
             self._register_features_on_flow(flow)
 
             # Initialize TCP state for new flows
-            if key.protocol == Protocol.TCP:
+            if protocol == Protocol.TCP:
                 self._tcp_states[canonical] = (TCPState.CLOSED, TCPState.CLOSED)
 
         # Check for UDP timeout (disabled when udp_timeout <= 0)
-        if key.protocol == Protocol.UDP and self.config.udp_timeout > 0:
+        if protocol == Protocol.UDP and self.config.udp_timeout > 0:
             if canonical in self._udp_last_seen:
                 if pkt.timestamp - self._udp_last_seen[canonical] > self.config.udp_timeout:
                     # Complete old flow, create new one for this packet
@@ -1066,6 +1099,8 @@ class FlowManager:
                         self._completed_flows.append(old_flow)
                     self._udp_last_seen.pop(canonical, None)
 
+                    key = FlowKey(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
+                                  dst_port=dst_port, protocol=protocol)
                     flow = Flow(key=key, start_time=pkt.timestamp, _verbose=True, _save_raw=False)
                     flow._canonical_key = canonical
                     self._flows[canonical] = flow
@@ -1073,23 +1108,28 @@ class FlowManager:
             self._udp_last_seen[canonical] = pkt.timestamp
 
         # Update TCP state
-        if pkt.tcp and key.protocol == Protocol.TCP:
+        if pkt.tcp and protocol == Protocol.TCP:
             self._update_tcp_state(flow, pkt)
 
         return flow
 
-    def _make_flow_key(self, pkt: ParsedPacket) -> tuple[tuple, FlowKey] | tuple[None, None]:
-        """Create canonical tuple key and FlowKey from packet.
+    def _extract_flow_tuple(self, pkt: ParsedPacket) -> tuple | None:
+        """Extract canonical tuple and raw fields from packet.
 
-        Returns (canonical_tuple, FlowKey) or (None, None) if packet has no IP layer.
-        The FlowKey preserves the direction of the FIRST packet that creates the flow.
+        Returns (canonical, src_ip, dst_ip, src_port, dst_port, protocol)
+        or None if packet has no IP layer.
         """
-        # Get IP layer info - support both IPv4 and IPv6
+        # Fast path: use pre-computed flow key from C++ parse_to_dataclass
+        cache = getattr(pkt, '_flow_key_cache', None)
+        if cache is not None:
+            return cache  # already (canonical, src_ip, dst_ip, src_port, dst_port, protocol)
+
+        # Fallback: original Python path (dpkt engine)
         ip = pkt.ip
         ip6 = pkt.ip6
 
         if not ip and not ip6:
-            return None, None
+            return None
 
         if ip:
             src_ip = ip.src
@@ -1098,9 +1138,9 @@ class FlowManager:
         elif ip6:
             src_ip = ip6.src
             dst_ip = ip6.dst
-            protocol = ip6.next_header  # IPv6 uses 'next_header' for protocol
+            protocol = ip6.next_header
         else:
-            return None, None
+            return None
 
         src_port = 0
         dst_port = 0
@@ -1113,14 +1153,7 @@ class FlowManager:
             dst_port = pkt.udp.dport
 
         canonical = _make_canonical_key(src_ip, dst_ip, src_port, dst_port, protocol)
-        key = FlowKey(
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            src_port=src_port,
-            dst_port=dst_port,
-            protocol=protocol
-        )
-        return canonical, key
+        return canonical, src_ip, dst_ip, src_port, dst_port, protocol
 
     def _update_tcp_state(self, flow: Flow, pkt: ParsedPacket) -> None:
         """Update TCP state machine based on packet flags."""

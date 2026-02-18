@@ -1,0 +1,7 @@
+name: tls_certificate
+fields:
+  - name: certificates
+    type: prefixed_list
+    list_length_size: 3
+    item_length_size: 3
+    item_format: bytes

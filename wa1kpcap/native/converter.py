@@ -10,6 +10,8 @@ from __future__ import annotations
 from wa1kpcap.core.packet import (
     ParsedPacket, EthernetInfo, IPInfo, IP6Info,
     TCPInfo, UDPInfo, DNSInfo, TLSInfo,
+    ARPInfo, ICMPInfo, ICMP6Info,
+    ProtocolInfo, ProtocolRegistry,
 )
 
 
@@ -62,6 +64,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             id=ip.get("identification", 0),
             flags=flags_raw,
             offset=ip.get("fragment_offset", 0),
+            _raw=ip.get("options_raw", b""),
         )
         pkt.ip_len = ip.get("total_length", 0)
 
@@ -76,6 +79,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             hop_limit=ip6.get("hop_limit", 0),
             flow_label=ip6.get("flow_label", 0),
             len=ip6.get("payload_length", 0),
+            _raw=ip6.get("options_raw", b""),
         )
         pkt.ip_len = 40 + ip6.get("payload_length", 0)
 
@@ -90,7 +94,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             flags=tcp.get("flags", 0),
             win=tcp.get("window", 0),
             urgent=tcp.get("urgent_pointer", 0),
-            options=b"",  # Options not parsed in YAML yet
+            options=tcp.get("options", b""),
         )
         header_len = tcp.get("header_length", 20)
         pkt.trans_len = header_len + d.get("app_len", 0)
@@ -130,6 +134,36 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             flags=dns.get("flags", 0),
         )
 
+    # ── ARP ──
+    arp = d.get("arp")
+    if arp and isinstance(arp, dict):
+        pkt.arp = ARPInfo(
+            hw_type=arp.get("hw_type", 0),
+            proto_type=arp.get("proto_type", 0),
+            opcode=arp.get("opcode", 0),
+            sender_mac=arp.get("sender_mac", ""),
+            sender_ip=arp.get("sender_ip", ""),
+            target_mac=arp.get("target_mac", ""),
+            target_ip=arp.get("target_ip", ""),
+        )
+
+    # ── ICMP ──
+    icmp = d.get("icmp")
+    if icmp and isinstance(icmp, dict):
+        pkt.icmp = ICMPInfo(
+            type=icmp.get("type", 0),
+            code=icmp.get("code", 0),
+        )
+
+    # ── ICMPv6 ──
+    icmpv6 = d.get("icmpv6")
+    if icmpv6 and isinstance(icmpv6, dict):
+        pkt.icmp6 = ICMP6Info(
+            type=icmpv6.get("type", 0),
+            code=icmpv6.get("code", 0),
+            checksum=icmpv6.get("checksum", 0),
+        )
+
     # ── TLS ──
     tls_record = d.get("tls_record")
     if tls_record and isinstance(tls_record, dict):
@@ -163,5 +197,24 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
         if sh and isinstance(sh, dict):
             pkt.tls.handshake_type = 2
             pkt.tls.cipher_suite = sh.get("cipher_suite")
+
+    # ── Generic fallback for unknown protocols ──
+    _KNOWN_KEYS = {
+        'ethernet', 'ipv4', 'ipv6', 'tcp', 'udp', 'dns',
+        'arp', 'icmp', 'icmpv6',
+        'tls_record', 'tls_handshake', 'tls_client_hello',
+        'tls_server_hello', 'tls_certificate', 'tls_stream',
+        '_raw_tcp_payload', '_raw_data', '_link_type', 'app_len',
+    }
+    registry = ProtocolRegistry.get_instance()
+    for key, val in d.items():
+        if key in _KNOWN_KEYS or not isinstance(val, dict):
+            continue
+        if key not in pkt.layers:
+            cls = registry.get(key)
+            if cls is not None:
+                pkt.layers[key] = cls(fields=val)
+            else:
+                pkt.layers[key] = ProtocolInfo(fields=val)
 
     return pkt

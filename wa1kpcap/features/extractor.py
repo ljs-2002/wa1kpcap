@@ -16,8 +16,15 @@ if TYPE_CHECKING:
 
 try:
     from wa1kpcap._wa1kpcap_native import compute_array_stats as _native_compute_stats
+    from wa1kpcap._wa1kpcap_native import compute_batch_stats as _native_batch_stats
 except ImportError:
     _native_compute_stats = None
+    _native_batch_stats = None
+
+_STAT_KEYS = ('mean', 'std', 'var', 'min', 'max', 'range', 'median',
+              'sum', 'up_mean', 'up_std', 'up_min', 'up_max',
+              'up_sum', 'up_count', 'down_mean', 'down_std',
+              'down_min', 'down_max', 'down_sum', 'down_count', 'count')
 
 
 @dataclass
@@ -98,38 +105,74 @@ class FlowFeatures:
         """
         stats = {}
 
-        # Total packet length statistics (wirelen)
-        if len(self.packet_lengths) > 0:
-            stats['packet_lengths'] = self._compute_array_stats(self.packet_lengths)
+        # Batch path: compute all array stats in one C++ call (flat array return)
+        if _native_batch_stats is not None:
+            named = {}
+            if len(self.packet_lengths) > 0:
+                named['packet_lengths'] = self.packet_lengths
+            if len(self.ip_lengths) > 0:
+                named['ip_lengths'] = self.ip_lengths
+            if len(self.trans_lengths) > 0:
+                named['trans_lengths'] = self.trans_lengths
+            if len(self.app_lengths) > 0:
+                named['app_lengths'] = self.app_lengths
+            if len(self.iats) > 0:
+                named['iats'] = self.iats
+            if len(self.payload_bytes) > 0:
+                named['payload_bytes'] = self.payload_bytes
+            if len(self.tcp_window_sizes) > 0:
+                named['tcp_window'] = self.tcp_window_sizes
+            if named:
+                names, flat = _native_batch_stats(named)
+                # Convert to Python list once — avoids numpy scalar boxing per access
+                flat = flat.tolist()
+                n_keys = 21
+                for i, name in enumerate(names):
+                    base = i * n_keys
+                    stats[name] = {
+                        'mean': flat[base], 'std': flat[base+1], 'var': flat[base+2],
+                        'min': flat[base+3], 'max': flat[base+4], 'range': flat[base+5],
+                        'median': flat[base+6], 'sum': flat[base+7],
+                        'up_mean': flat[base+8], 'up_std': flat[base+9],
+                        'up_min': flat[base+10], 'up_max': flat[base+11],
+                        'up_sum': flat[base+12], 'up_count': int(flat[base+13]),
+                        'down_mean': flat[base+14], 'down_std': flat[base+15],
+                        'down_min': flat[base+16], 'down_max': flat[base+17],
+                        'down_sum': flat[base+18], 'down_count': int(flat[base+19]),
+                        'count': int(flat[base+20]),
+                    }
+        else:
+            # Fallback: individual calls
+            if len(self.packet_lengths) > 0:
+                stats['packet_lengths'] = self._compute_array_stats(self.packet_lengths)
+            if len(self.ip_lengths) > 0:
+                stats['ip_lengths'] = self._compute_array_stats(self.ip_lengths)
+            if len(self.trans_lengths) > 0:
+                stats['trans_lengths'] = self._compute_array_stats(self.trans_lengths)
+            if len(self.app_lengths) > 0:
+                stats['app_lengths'] = self._compute_array_stats(self.app_lengths)
+            if len(self.iats) > 0:
+                stats['iats'] = self._compute_array_stats(self.iats)
+            if len(self.payload_bytes) > 0:
+                stats['payload_bytes'] = self._compute_array_stats(self.payload_bytes)
+            if len(self.tcp_window_sizes) > 0:
+                stats['tcp_window'] = self._compute_array_stats(self.tcp_window_sizes)
 
-        # IP layer length statistics (ip_len)
-        if len(self.ip_lengths) > 0:
-            stats['ip_lengths'] = self._compute_array_stats(self.ip_lengths)
-
-        # Transport layer length statistics (trans_len)
-        if len(self.trans_lengths) > 0:
-            stats['trans_lengths'] = self._compute_array_stats(self.trans_lengths)
-
-        # App payload length statistics (app_len)
-        if len(self.app_lengths) > 0:
-            stats['app_lengths'] = self._compute_array_stats(self.app_lengths)
-
-        # IAT statistics
-        if len(self.iats) > 0:
-            stats['iats'] = self._compute_array_stats(self.iats)
-
-        # Payload bytes statistics (legacy, same as app_lengths)
-        if len(self.payload_bytes) > 0:
-            stats['payload_bytes'] = self._compute_array_stats(self.payload_bytes)
-
-        # TCP window statistics
-        if len(self.tcp_window_sizes) > 0:
-            stats['tcp_window'] = self._compute_array_stats(self.tcp_window_sizes)
-
-        # Basic flow stats
-        stats['packet_count'] = len(self.packet_lengths)
-        stats['total_bytes'] = int(np.sum(np.abs(self.packet_lengths))) if len(self.packet_lengths) > 0 else 0
-        stats['duration'] = float(np.max(self.timestamps) - np.min(self.timestamps)) if len(self.timestamps) > 1 else 0.0
+        # Basic flow stats — derive from already-computed stats to avoid numpy calls
+        pkt_stats = stats.get('packet_lengths')
+        if pkt_stats:
+            stats['packet_count'] = pkt_stats['count']
+            stats['total_bytes'] = int(pkt_stats['sum'])
+        else:
+            stats['packet_count'] = len(self.packet_lengths)
+            stats['total_bytes'] = 0
+        iat_stats = stats.get('iats')
+        if iat_stats:
+            stats['duration'] = iat_stats['sum']
+        elif len(self.timestamps) > 1:
+            stats['duration'] = float(self.timestamps[-1] - self.timestamps[0])
+        else:
+            stats['duration'] = 0.0
 
         self._statistics = stats
         return stats

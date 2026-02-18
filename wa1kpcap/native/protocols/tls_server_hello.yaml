@@ -25,10 +25,10 @@ fields:
     size: 1
     format: uint
   - name: extensions
-    type: ext_list
-    total_length_size: 2
+    type: prefixed_list
+    list_length_size: 2
     type_size: 2
-    length_size: 2
+    item_length_size: 2
     type_mapping:
       0x0000: tls_ext_sni
       0x000A: tls_ext_supported_groups
