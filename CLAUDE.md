@@ -8,6 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Python executable: `D:/miniconda3/envs/web/python.exe`
 - Platform: Windows 11, but shell commands use Unix syntax (bash).
 
+## Language
+
+  - Respond in Chinese (中文) for explanatory, discussion, or conversational replies.
+  - Internal thinking, code, comments, and commit messages can remain in English.
+
 ## Build & Install
 
 The project uses scikit-build-core with CMake for the optional C++ native engine.
@@ -73,13 +78,43 @@ Key mechanisms in `protocol_engine.cpp`:
 - `ext_list` primitive: TLS-style extension list with `[total_len][type][len][data]...` format. Sub-protocol fields are merged into the parent FieldMap with a prefix (e.g., `tls_ext_sni.server_name`). Used by `tls_client_hello.yaml` and `tls_server_hello.yaml` to parse TLS extensions via YAML instead of hardcoded C++.
 - TLS is NOT chained from TCP via `next_protocol` — TCP's YAML has no next_protocol to TLS. Instead, TLS is parsed via a separate reassembly path: Python buffers TCP payloads, extracts complete TLS records, then calls C++ `NativeParser.parse_tls_record()` which uses `parse_from_protocol_struct("tls_record", ...)` to parse starting from the TLS layer.
 
+#### Dispatch Tables
+
+The engine uses `unordered_map` dispatch tables (populated in the `ProtocolEngine` constructor) instead of if-else chains:
+
+- `fast_dispatch_` (`std::unordered_map<std::string, FastParseFn>`): maps protocol name → fast-path parser. Unified signature: `FastResult(const uint8_t* buf, size_t len, size_t remaining, NativeParsedPacket& pkt)`. Only Type A protocols register here.
+- `fill_dispatch_` (`std::unordered_map<std::string, std::function<void(SlowFillContext&)>>`): maps protocol name → fill function. Both Type A and Type B protocols register here. `SlowFillContext` carries `pkt`, `fields`, `cur`, `bytes_consumed`, `remaining`, `has_tls`, `tls_layers`, `proto_name`.
+
+New built-in protocols register by adding lambdas in the constructor. Some protocols have special fill logic (TCP/UDP compute `app_len`, TLS sub-layers store into `tls_layers` for deferred processing).
+
+#### Two Built-in Protocol Subtypes
+
+- **Type A: Fast-Path** — has both `fast_parse_xxx()` (raw byte parsing, registered in `fast_dispatch_`) and `fill_xxx()` (registered in `fill_dispatch_`). For simple fixed-layout wire formats. Current: Ethernet, IPv4, IPv6, TCP, UDP, ARP, ICMP, ICMPv6.
+- **Type B: Fill-Only** — has only `fill_xxx()` (registered in `fill_dispatch_`). YAML engine handles all parsing; fill copies fields into the C++ struct. For complex variable formats. Current: DNS, TLS series (tls_stream, tls_record, tls_handshake, tls_client_hello, tls_server_hello, tls_certificate).
+
+Rule of thumb: if you can parse with pointer arithmetic in < 50 lines of C++, use Type A. If parsing needs TLV, compression, counted lists — use Type B.
+
+#### Profiling Infrastructure
+
+Built-in timing instrumentation controlled by a global flag:
+
+- `g_profiling_enabled` (bool): global toggle, default `false`.
+- `g_prof` (`ProfilingStats`): atomic counters for `total_ns`, `parse_layer_ns`, `fill_struct_ns`, `next_proto_ns`, `fieldmap_insert_ns`, `total_packets`, `total_layers`, plus per-primitive counters (`fixed_ns`/`fixed_count`, `bitfield_ns`/`bitfield_count`, etc.).
+- `ScopedTimer`: RAII timer that accumulates nanoseconds into a target `std::atomic<uint64_t>` when `g_profiling_enabled` is true.
+- Python API (exposed in `bindings.cpp`): `profiling_enable()`, `profiling_disable()`, `profiling_reset()`, `profiling_get_stats()` → returns dict with all counters.
+
 The fast path (`parse_to_dataclass` in `bindings.cpp`) parses to a C++ `NativeParsedPacket` struct, then constructs Python dataclasses directly with positional args (cached class references, pre-cached constants like `py::none()` and `py::bytes("")`). The legacy path (`parse_packet` → `py::dict` → `converter.py`) is only used for fallback BPF app-layer filtering.
 
 `NativeParsedPacket` (`parsed_packet.h`) embeds all sub-structs (NativeIPInfo, NativeTCPInfo, etc.) directly — no heap allocation. Presence flags (`has_eth`, `has_ip`, etc.) replace nullptr checks. pybind11 bindings return `py::none()` when the flag is false. Unknown protocols parsed by YAML are stored in `extra_layers` (a `std::map<std::string, FieldMap>`), converted to Python dicts in `build_dataclass_from_struct`, and passed to `ParsedPacket.__init__` which wraps them in `ProtocolInfo` instances via `ProtocolRegistry`.
 
 ### ProtocolInfo & Extensibility (`wa1kpcap/core/packet.py`)
 
-All protocol layer data is stored as `ProtocolInfo` subclasses with a `_fields` dict as source of truth. Built-in subclasses (`EthernetInfo`, `IPInfo`, `TCPInfo`, `UDPInfo`, `TLSInfo`, `DNSInfo`, `HTTPInfo`) add typed properties for IDE autocomplete. `ParsedPacket.layers` is a `dict[str, ProtocolInfo]` keyed by protocol name; legacy properties like `pkt.ip`, `pkt.tls` are aliases into this dict.
+Protocol layer data uses a two-tier class hierarchy under a common `_ProtocolInfoBase`:
+
+- **Built-in protocols** (`EthernetInfo`, `IPInfo`, `TCPInfo`, `UDPInfo`, `TLSInfo`, `DNSInfo`, `HTTPInfo`, etc.) inherit from `_SlottedInfoBase(_ProtocolInfoBase)` and store fields as direct `__slots__` attributes for performance (~40% faster construction than dict-based). Each class defines `__slots__`, `_SLOT_NAMES`, and `_SLOT_DEFAULTS`. The `_fields` property returns a dict view of all slots for compatibility.
+- **Custom/user protocols** inherit from `ProtocolInfo(_ProtocolInfoBase)` and use a `_fields` dict as source of truth, with typed property accessors.
+
+`ParsedPacket.layers` is a `dict[str, _ProtocolInfoBase]` keyed by protocol name; legacy properties like `pkt.ip`, `pkt.tls` are aliases into this dict. The `isinstance` check in `_aggregate_flow_info()` uses `_ProtocolInfoBase` (the common ancestor).
 
 To add a new protocol without modifying C++:
 1. Create `<name>.yaml` in `wa1kpcap/native/protocols/` (or a custom directory).
@@ -87,7 +122,11 @@ To add a new protocol without modifying C++:
 3. Register it: `ProtocolRegistry.get_instance().register('<name>', MyProtoInfo)`.
 4. Add the `next_protocol` mapping that routes to it (e.g., in `udp.yaml`: `7777: myproto`).
 
-Known protocols use optimized C++ struct fill functions (fast path). Unknown protocols go through `extra_layers` → `ProtocolRegistry` lookup → `ProtocolInfo` construction. If no class is registered, a generic `ProtocolInfo(fields=dict)` is used as fallback.
+To add a new built-in protocol (with C++ fast path):
+1. Follow the steps in `docs/add-builtin-protocol-guide.md` or use `/add-builtin-protocol`.
+2. The Python Info class must inherit `_SlottedInfoBase` with `__slots__` direct attributes (not `ProtocolInfo` with `_fields` dict).
+
+Known protocols use dispatch table lookups (`fast_dispatch_` / `fill_dispatch_`) for optimized C++ struct fill. Unknown protocols go through `extra_layers` → `ProtocolRegistry` lookup → `ProtocolInfo` construction. If no class is registered, a generic `ProtocolInfo(fields=dict)` is used as fallback.
 
 Flow-level aggregation in `analyzer.py:_aggregate_flow_info()` iterates `pkt.layers` generically: first packet's layer is `copy()`'d, subsequent packets' layers are `merge()`'d. The `copy()` is a selective shallow copy (one-level `list()`/`dict()` for mutables, direct reference for scalars) — not `deepcopy`.
 

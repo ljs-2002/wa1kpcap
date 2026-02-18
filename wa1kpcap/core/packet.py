@@ -14,10 +14,15 @@ if TYPE_CHECKING:
     import dpkt
 
 
-class ProtocolInfo:
+class _ProtocolInfoBase:
+    """Abstract base for all protocol info objects. No slots defined here."""
+    __slots__ = ()
+
+
+class ProtocolInfo(_ProtocolInfoBase):
     """Base class for protocol info objects.
 
-    Stores parsed fields in _fields dict. Subclasses add typed properties.
+    Custom protocols use _fields dict. Built-in subclasses use __slots__ directly.
     """
     __slots__ = ('_fields',)
 
@@ -45,6 +50,44 @@ class ProtocolInfo:
         for k, v in other._fields.items():
             if k not in self._fields or self._fields[k] is None:
                 self._fields[k] = v
+
+
+class _SlottedInfoBase(_ProtocolInfoBase):
+    """Base for __slots__-based built-in Info classes.
+
+    Subclasses must define _SLOT_NAMES (tuple of field names).
+    Inherits from _ProtocolInfoBase so isinstance(_ProtocolInfoBase) passes.
+    """
+    __slots__ = ()
+
+    def get(self, key: str, default=None):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+
+    @property
+    def _fields(self) -> dict:
+        return {k: getattr(self, k) for k in self._SLOT_NAMES}
+
+    def copy(self):
+        obj = object.__new__(type(self))
+        for k in self._SLOT_NAMES:
+            v = getattr(self, k)
+            if isinstance(v, list):
+                v = list(v)
+            elif isinstance(v, dict):
+                v = dict(v)
+            setattr(obj, k, v)
+        return obj
+
+    def merge(self, other) -> None:
+        for k in self._SLOT_NAMES:
+            cur = getattr(self, k)
+            if cur is None:
+                v = getattr(other, k, None)
+                if v is not None:
+                    setattr(self, k, v)
 
 
 class ProtocolRegistry:
@@ -94,35 +137,23 @@ class Layer(Enum):
     APPLICATION = 7
 
 
-class EthernetInfo(ProtocolInfo):
+class EthernetInfo(_SlottedInfoBase):
     """Ethernet layer information."""
-    __slots__ = ()
+    __slots__ = ('src', 'dst', 'type', '_raw')
+    _SLOT_NAMES = ('src', 'dst', 'type', '_raw')
+    _SLOT_DEFAULTS = ('', '', 0, b'')
 
     def __init__(self, src="", dst="", type=0, _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.src = fields.get('src', "")
+            self.dst = fields.get('dst', "")
+            self.type = fields.get('type', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={'src': src, 'dst': dst, 'type': type, '_raw': _raw})
-
-    @property
-    def src(self) -> str: return self._fields.get('src', "")
-    @src.setter
-    def src(self, v): self._fields['src'] = v
-
-    @property
-    def dst(self) -> str: return self._fields.get('dst', "")
-    @dst.setter
-    def dst(self, v): self._fields['dst'] = v
-
-    @property
-    def type(self) -> int: return self._fields.get('type', 0)
-    @type.setter
-    def type(self, v): self._fields['type'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.src = src
+            self.dst = dst
+            self.type = type
+            self._raw = _raw
 
     @classmethod
     def from_dpkt(cls, eth: dpkt.ethernet.Ethernet) -> EthernetInfo:
@@ -133,70 +164,36 @@ class EthernetInfo(ProtocolInfo):
         )
 
 
-class IPInfo(ProtocolInfo):
+class IPInfo(_SlottedInfoBase):
     """IPv4 layer information."""
-    __slots__ = ()
+    __slots__ = ('version', 'src', 'dst', 'proto', 'ttl', 'len', 'id', 'flags', 'offset', '_raw')
+    _SLOT_NAMES = ('version', 'src', 'dst', 'proto', 'ttl', 'len', 'id', 'flags', 'offset', '_raw')
+    _SLOT_DEFAULTS = (0, '', '', 0, 0, 0, 0, 0, 0, b'')
 
     def __init__(self, version=0, src="", dst="", proto=0, ttl=0, len=0,
                  id=0, flags=0, offset=0, _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.version = fields.get('version', 0)
+            self.src = fields.get('src', "")
+            self.dst = fields.get('dst', "")
+            self.proto = fields.get('proto', 0)
+            self.ttl = fields.get('ttl', 0)
+            self.len = fields.get('len', 0)
+            self.id = fields.get('id', 0)
+            self.flags = fields.get('flags', 0)
+            self.offset = fields.get('offset', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'version': version, 'src': src, 'dst': dst, 'proto': proto,
-                'ttl': ttl, 'len': len, 'id': id, 'flags': flags,
-                'offset': offset, '_raw': _raw,
-            })
-
-    @property
-    def version(self) -> int: return self._fields.get('version', 0)
-    @version.setter
-    def version(self, v): self._fields['version'] = v
-
-    @property
-    def src(self) -> str: return self._fields.get('src', "")
-    @src.setter
-    def src(self, v): self._fields['src'] = v
-
-    @property
-    def dst(self) -> str: return self._fields.get('dst', "")
-    @dst.setter
-    def dst(self, v): self._fields['dst'] = v
-
-    @property
-    def proto(self) -> int: return self._fields.get('proto', 0)
-    @proto.setter
-    def proto(self, v): self._fields['proto'] = v
-
-    @property
-    def ttl(self) -> int: return self._fields.get('ttl', 0)
-    @ttl.setter
-    def ttl(self, v): self._fields['ttl'] = v
-
-    @property
-    def len(self) -> int: return self._fields.get('len', 0)
-    @len.setter
-    def len(self, v): self._fields['len'] = v
-
-    @property
-    def id(self) -> int: return self._fields.get('id', 0)
-    @id.setter
-    def id(self, v): self._fields['id'] = v
-
-    @property
-    def flags(self) -> int: return self._fields.get('flags', 0)
-    @flags.setter
-    def flags(self, v): self._fields['flags'] = v
-
-    @property
-    def offset(self) -> int: return self._fields.get('offset', 0)
-    @offset.setter
-    def offset(self, v): self._fields['offset'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.version = version
+            self.src = src
+            self.dst = dst
+            self.proto = proto
+            self.ttl = ttl
+            self.len = len
+            self.id = id
+            self.flags = flags
+            self.offset = offset
+            self._raw = _raw
 
     @property
     def is_fragment(self) -> bool:
@@ -226,60 +223,32 @@ class IPInfo(ProtocolInfo):
         )
 
 
-class IP6Info(ProtocolInfo):
+class IP6Info(_SlottedInfoBase):
     """IPv6 layer information."""
-    __slots__ = ()
+    __slots__ = ('version', 'src', 'dst', 'next_header', 'hop_limit', 'flow_label', 'len', '_raw')
+    _SLOT_NAMES = ('version', 'src', 'dst', 'next_header', 'hop_limit', 'flow_label', 'len', '_raw')
+    _SLOT_DEFAULTS = (0, '', '', 0, 0, 0, 0, b'')
 
     def __init__(self, version=0, src="", dst="", next_header=0, hop_limit=0,
                  flow_label=0, len=0, _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.version = fields.get('version', 0)
+            self.src = fields.get('src', "")
+            self.dst = fields.get('dst', "")
+            self.next_header = fields.get('next_header', 0)
+            self.hop_limit = fields.get('hop_limit', 0)
+            self.flow_label = fields.get('flow_label', 0)
+            self.len = fields.get('len', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'version': version, 'src': src, 'dst': dst,
-                'next_header': next_header, 'hop_limit': hop_limit,
-                'flow_label': flow_label, 'len': len, '_raw': _raw,
-            })
-
-    @property
-    def version(self) -> int: return self._fields.get('version', 0)
-    @version.setter
-    def version(self, v): self._fields['version'] = v
-
-    @property
-    def src(self) -> str: return self._fields.get('src', "")
-    @src.setter
-    def src(self, v): self._fields['src'] = v
-
-    @property
-    def dst(self) -> str: return self._fields.get('dst', "")
-    @dst.setter
-    def dst(self, v): self._fields['dst'] = v
-
-    @property
-    def next_header(self) -> int: return self._fields.get('next_header', 0)
-    @next_header.setter
-    def next_header(self, v): self._fields['next_header'] = v
-
-    @property
-    def hop_limit(self) -> int: return self._fields.get('hop_limit', 0)
-    @hop_limit.setter
-    def hop_limit(self, v): self._fields['hop_limit'] = v
-
-    @property
-    def flow_label(self) -> int: return self._fields.get('flow_label', 0)
-    @flow_label.setter
-    def flow_label(self, v): self._fields['flow_label'] = v
-
-    @property
-    def len(self) -> int: return self._fields.get('len', 0)
-    @len.setter
-    def len(self, v): self._fields['len'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.version = version
+            self.src = src
+            self.dst = dst
+            self.next_header = next_header
+            self.hop_limit = hop_limit
+            self.flow_label = flow_label
+            self.len = len
+            self._raw = _raw
 
     @classmethod
     def from_dpkt(cls, ip6: dpkt.ip6.IP6) -> IP6Info:
@@ -295,65 +264,34 @@ class IP6Info(ProtocolInfo):
         )
 
 
-class TCPInfo(ProtocolInfo):
+class TCPInfo(_SlottedInfoBase):
     """TCP segment information."""
-    __slots__ = ()
+    __slots__ = ('sport', 'dport', 'seq', 'ack_num', 'flags', 'win', 'urgent', 'options', '_raw')
+    _SLOT_NAMES = ('sport', 'dport', 'seq', 'ack_num', 'flags', 'win', 'urgent', 'options', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, 0, 0, 0, 0, b'', b'')
 
     def __init__(self, sport=0, dport=0, seq=0, ack_num=0, flags=0,
                  win=0, urgent=0, options=b"", _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.sport = fields.get('sport', 0)
+            self.dport = fields.get('dport', 0)
+            self.seq = fields.get('seq', 0)
+            self.ack_num = fields.get('ack_num', 0)
+            self.flags = fields.get('flags', 0)
+            self.win = fields.get('win', 0)
+            self.urgent = fields.get('urgent', 0)
+            self.options = fields.get('options', b"")
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'sport': sport, 'dport': dport, 'seq': seq,
-                'ack_num': ack_num, 'flags': flags, 'win': win,
-                'urgent': urgent, 'options': options, '_raw': _raw,
-            })
-
-    @property
-    def sport(self) -> int: return self._fields.get('sport', 0)
-    @sport.setter
-    def sport(self, v): self._fields['sport'] = v
-
-    @property
-    def dport(self) -> int: return self._fields.get('dport', 0)
-    @dport.setter
-    def dport(self, v): self._fields['dport'] = v
-
-    @property
-    def seq(self) -> int: return self._fields.get('seq', 0)
-    @seq.setter
-    def seq(self, v): self._fields['seq'] = v
-
-    @property
-    def ack_num(self) -> int: return self._fields.get('ack_num', 0)
-    @ack_num.setter
-    def ack_num(self, v): self._fields['ack_num'] = v
-
-    @property
-    def flags(self) -> int: return self._fields.get('flags', 0)
-    @flags.setter
-    def flags(self, v): self._fields['flags'] = v
-
-    @property
-    def win(self) -> int: return self._fields.get('win', 0)
-    @win.setter
-    def win(self, v): self._fields['win'] = v
-
-    @property
-    def urgent(self) -> int: return self._fields.get('urgent', 0)
-    @urgent.setter
-    def urgent(self, v): self._fields['urgent'] = v
-
-    @property
-    def options(self) -> bytes: return self._fields.get('options', b"")
-    @options.setter
-    def options(self, v): self._fields['options'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.sport = sport
+            self.dport = dport
+            self.seq = seq
+            self.ack_num = ack_num
+            self.flags = flags
+            self.win = win
+            self.urgent = urgent
+            self.options = options
+            self._raw = _raw
 
     @property
     def syn(self) -> bool: return bool(self.flags & 0x02)
@@ -391,35 +329,23 @@ class TCPInfo(ProtocolInfo):
         )
 
 
-class UDPInfo(ProtocolInfo):
+class UDPInfo(_SlottedInfoBase):
     """UDP datagram information."""
-    __slots__ = ()
+    __slots__ = ('sport', 'dport', 'len', '_raw')
+    _SLOT_NAMES = ('sport', 'dport', 'len', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, b'')
 
     def __init__(self, sport=0, dport=0, len=0, _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.sport = fields.get('sport', 0)
+            self.dport = fields.get('dport', 0)
+            self.len = fields.get('len', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={'sport': sport, 'dport': dport, 'len': len, '_raw': _raw})
-
-    @property
-    def sport(self) -> int: return self._fields.get('sport', 0)
-    @sport.setter
-    def sport(self, v): self._fields['sport'] = v
-
-    @property
-    def dport(self) -> int: return self._fields.get('dport', 0)
-    @dport.setter
-    def dport(self, v): self._fields['dport'] = v
-
-    @property
-    def len(self) -> int: return self._fields.get('len', 0)
-    @len.setter
-    def len(self, v): self._fields['len'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.sport = sport
+            self.dport = dport
+            self.len = len
+            self._raw = _raw
 
     @classmethod
     def from_dpkt(cls, udp: dpkt.udp.UDP) -> UDPInfo:
@@ -430,130 +356,86 @@ class UDPInfo(ProtocolInfo):
         )
 
 
-class ICMPInfo(ProtocolInfo):
+class ICMPInfo(_SlottedInfoBase):
     """ICMP message information."""
-    __slots__ = ()
+    __slots__ = ('type', 'code', '_raw')
+    _SLOT_NAMES = ('type', 'code', '_raw')
+    _SLOT_DEFAULTS = (0, 0, b'')
 
     def __init__(self, type=0, code=0, _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.type = fields.get('type', 0)
+            self.code = fields.get('code', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={'type': type, 'code': code, '_raw': _raw})
-
-    @property
-    def type(self) -> int: return self._fields.get('type', 0)
-    @type.setter
-    def type(self, v): self._fields['type'] = v
-
-    @property
-    def code(self) -> int: return self._fields.get('code', 0)
-    @code.setter
-    def code(self, v): self._fields['code'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.type = type
+            self.code = code
+            self._raw = _raw
 
     @classmethod
     def from_dpkt(cls, icmp: dpkt.icmp.ICMP) -> ICMPInfo:
         return cls(type=icmp.type, code=icmp.code)
 
 
-class ARPInfo(ProtocolInfo):
+class ARPInfo(_SlottedInfoBase):
     """ARP message information."""
-    __slots__ = ()
+    __slots__ = ('hw_type', 'proto_type', 'opcode', 'sender_mac', 'sender_ip', 'target_mac', 'target_ip', '_raw')
+    _SLOT_NAMES = ('hw_type', 'proto_type', 'opcode', 'sender_mac', 'sender_ip', 'target_mac', 'target_ip', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, '', '', '', '', b'')
 
     def __init__(self, hw_type=0, proto_type=0, opcode=0,
                  sender_mac="", sender_ip="", target_mac="", target_ip="",
                  _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.hw_type = fields.get('hw_type', 0)
+            self.proto_type = fields.get('proto_type', 0)
+            self.opcode = fields.get('opcode', 0)
+            self.sender_mac = fields.get('sender_mac', "")
+            self.sender_ip = fields.get('sender_ip', "")
+            self.target_mac = fields.get('target_mac', "")
+            self.target_ip = fields.get('target_ip', "")
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'hw_type': hw_type, 'proto_type': proto_type, 'opcode': opcode,
-                'sender_mac': sender_mac, 'sender_ip': sender_ip,
-                'target_mac': target_mac, 'target_ip': target_ip, '_raw': _raw,
-            })
-
-    @property
-    def hw_type(self) -> int: return self._fields.get('hw_type', 0)
-    @hw_type.setter
-    def hw_type(self, v): self._fields['hw_type'] = v
-
-    @property
-    def proto_type(self) -> int: return self._fields.get('proto_type', 0)
-    @proto_type.setter
-    def proto_type(self, v): self._fields['proto_type'] = v
-
-    @property
-    def opcode(self) -> int: return self._fields.get('opcode', 0)
-    @opcode.setter
-    def opcode(self, v): self._fields['opcode'] = v
-
-    @property
-    def sender_mac(self) -> str: return self._fields.get('sender_mac', "")
-    @sender_mac.setter
-    def sender_mac(self, v): self._fields['sender_mac'] = v
-
-    @property
-    def sender_ip(self) -> str: return self._fields.get('sender_ip', "")
-    @sender_ip.setter
-    def sender_ip(self, v): self._fields['sender_ip'] = v
-
-    @property
-    def target_mac(self) -> str: return self._fields.get('target_mac', "")
-    @target_mac.setter
-    def target_mac(self, v): self._fields['target_mac'] = v
-
-    @property
-    def target_ip(self) -> str: return self._fields.get('target_ip', "")
-    @target_ip.setter
-    def target_ip(self, v): self._fields['target_ip'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.hw_type = hw_type
+            self.proto_type = proto_type
+            self.opcode = opcode
+            self.sender_mac = sender_mac
+            self.sender_ip = sender_ip
+            self.target_mac = target_mac
+            self.target_ip = target_ip
+            self._raw = _raw
 
 
-class ICMP6Info(ProtocolInfo):
+class ICMP6Info(_SlottedInfoBase):
     """ICMPv6 message information."""
-    __slots__ = ()
+    __slots__ = ('type', 'code', 'checksum', '_raw')
+    _SLOT_NAMES = ('type', 'code', 'checksum', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, b'')
 
     def __init__(self, type=0, code=0, checksum=0, _raw=b"",
                  fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.type = fields.get('type', 0)
+            self.code = fields.get('code', 0)
+            self.checksum = fields.get('checksum', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'type': type, 'code': code, 'checksum': checksum, '_raw': _raw,
-            })
-
-    @property
-    def type(self) -> int: return self._fields.get('type', 0)
-    @type.setter
-    def type(self, v): self._fields['type'] = v
-
-    @property
-    def code(self) -> int: return self._fields.get('code', 0)
-    @code.setter
-    def code(self, v): self._fields['code'] = v
-
-    @property
-    def checksum(self) -> int: return self._fields.get('checksum', 0)
-    @checksum.setter
-    def checksum(self, v): self._fields['checksum'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.type = type
+            self.code = code
+            self.checksum = checksum
+            self._raw = _raw
 
 
-class TLSInfo(ProtocolInfo):
+class TLSInfo(_SlottedInfoBase):
     """TLS/SSL protocol information."""
-    __slots__ = ()
+    __slots__ = ('version', 'content_type', 'handshake_type', 'sni', 'cipher_suites',
+                 'cipher_suite', 'alpn', 'signature_algorithms', 'supported_groups',
+                 'certificate', 'certificates', 'exts', 'extensions',
+                 'record_length', '_raw', '_handshake_types')
+    _SLOT_NAMES = ('version', 'content_type', 'handshake_type', 'sni', 'cipher_suites',
+                   'cipher_suite', 'alpn', 'signature_algorithms', 'supported_groups',
+                   'certificate', 'certificates', 'exts', 'extensions',
+                   'record_length', '_raw', '_handshake_types')
 
     def __init__(self, version=None, content_type=None, handshake_type=None,
                  sni=None, cipher_suites=None, cipher_suite=None,
@@ -563,104 +445,39 @@ class TLSInfo(ProtocolInfo):
                  _handshake_types=None,
                  fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.version = fields.get('version')
+            self.content_type = fields.get('content_type')
+            self.handshake_type = fields.get('handshake_type')
+            self.sni = fields.get('sni') or []
+            self.cipher_suites = fields.get('cipher_suites') or []
+            self.cipher_suite = fields.get('cipher_suite')
+            self.alpn = fields.get('alpn') or []
+            self.signature_algorithms = fields.get('signature_algorithms') or []
+            self.supported_groups = fields.get('supported_groups') or []
+            self.certificate = fields.get('certificate')
+            self.certificates = fields.get('certificates') or []
+            self.exts = fields.get('exts') or {}
+            self.extensions = fields.get('extensions') or []
+            self.record_length = fields.get('record_length', 0)
+            self._raw = fields.get('_raw', b"")
+            self._handshake_types = fields.get('_handshake_types') or []
         else:
-            super().__init__(fields={
-                'version': version, 'content_type': content_type,
-                'handshake_type': handshake_type,
-                'sni': sni if sni is not None else [],
-                'cipher_suites': cipher_suites if cipher_suites is not None else [],
-                'cipher_suite': cipher_suite,
-                'alpn': alpn if alpn is not None else [],
-                'signature_algorithms': signature_algorithms if signature_algorithms is not None else [],
-                'supported_groups': supported_groups if supported_groups is not None else [],
-                'certificate': certificate,
-                'certificates': certificates if certificates is not None else [],
-                'exts': exts if exts is not None else {},
-                'extensions': extensions if extensions is not None else [],
-                'record_length': record_length, '_raw': _raw,
-                '_handshake_types': _handshake_types if _handshake_types is not None else [],
-            })
-
-    @property
-    def version(self): return self._fields.get('version')
-    @version.setter
-    def version(self, v): self._fields['version'] = v
-
-    @property
-    def content_type(self): return self._fields.get('content_type')
-    @content_type.setter
-    def content_type(self, v): self._fields['content_type'] = v
-
-    @property
-    def handshake_type(self): return self._fields.get('handshake_type')
-    @handshake_type.setter
-    def handshake_type(self, v): self._fields['handshake_type'] = v
-
-    @property
-    def sni(self) -> list[str]: return self._fields.get('sni', [])
-    @sni.setter
-    def sni(self, v): self._fields['sni'] = v
-
-    @property
-    def cipher_suites(self) -> list[int]: return self._fields.get('cipher_suites', [])
-    @cipher_suites.setter
-    def cipher_suites(self, v): self._fields['cipher_suites'] = v
-
-    @property
-    def cipher_suite(self): return self._fields.get('cipher_suite')
-    @cipher_suite.setter
-    def cipher_suite(self, v): self._fields['cipher_suite'] = v
-
-    @property
-    def alpn(self) -> list[str]: return self._fields.get('alpn', [])
-    @alpn.setter
-    def alpn(self, v): self._fields['alpn'] = v
-
-    @property
-    def signature_algorithms(self) -> list[int]: return self._fields.get('signature_algorithms', [])
-    @signature_algorithms.setter
-    def signature_algorithms(self, v): self._fields['signature_algorithms'] = v
-
-    @property
-    def supported_groups(self) -> list[int]: return self._fields.get('supported_groups', [])
-    @supported_groups.setter
-    def supported_groups(self, v): self._fields['supported_groups'] = v
-
-    @property
-    def certificate(self): return self._fields.get('certificate')
-    @certificate.setter
-    def certificate(self, v): self._fields['certificate'] = v
-
-    @property
-    def certificates(self) -> list[bytes]: return self._fields.get('certificates', [])
-    @certificates.setter
-    def certificates(self, v): self._fields['certificates'] = v
-
-    @property
-    def exts(self) -> dict[int, list[bytes]]: return self._fields.get('exts', {})
-    @exts.setter
-    def exts(self, v): self._fields['exts'] = v
-
-    @property
-    def extensions(self) -> list[tuple[int, bytes]]: return self._fields.get('extensions', [])
-    @extensions.setter
-    def extensions(self, v): self._fields['extensions'] = v
-
-    @property
-    def record_length(self) -> int: return self._fields.get('record_length', 0)
-    @record_length.setter
-    def record_length(self, v): self._fields['record_length'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
-
-    @property
-    def _handshake_types(self) -> list[int]: return self._fields.get('_handshake_types', [])
-    @_handshake_types.setter
-    def _handshake_types(self, v): self._fields['_handshake_types'] = v
+            self.version = version
+            self.content_type = content_type
+            self.handshake_type = handshake_type
+            self.sni = sni if sni is not None else []
+            self.cipher_suites = cipher_suites if cipher_suites is not None else []
+            self.cipher_suite = cipher_suite
+            self.alpn = alpn if alpn is not None else []
+            self.signature_algorithms = signature_algorithms if signature_algorithms is not None else []
+            self.supported_groups = supported_groups if supported_groups is not None else []
+            self.certificate = certificate
+            self.certificates = certificates if certificates is not None else []
+            self.exts = exts if exts is not None else {}
+            self.extensions = extensions if extensions is not None else []
+            self.record_length = record_length
+            self._raw = _raw
+            self._handshake_types = _handshake_types if _handshake_types is not None else []
 
     def get_extension(self, ext_type: int) -> list[bytes] | None:
         return self.exts.get(ext_type)
@@ -723,80 +540,43 @@ class TLSInfo(ProtocolInfo):
                         self.exts[ext_type].append(d)
 
 
-class HTTPInfo(ProtocolInfo):
+class HTTPInfo(_SlottedInfoBase):
     """HTTP protocol information."""
-    __slots__ = ()
+    __slots__ = ('method', 'host', 'path', 'user_agent', 'status_code',
+                 'status_reason', 'headers', 'content_type', 'content_length',
+                 'version', '_raw')
+    _SLOT_NAMES = ('method', 'host', 'path', 'user_agent', 'status_code',
+                   'status_reason', 'headers', 'content_type', 'content_length',
+                   'version', '_raw')
 
     def __init__(self, method=None, host=None, path=None, user_agent=None,
                  status_code=None, status_reason=None, headers=None,
                  content_type=None, content_length=None, version=None,
                  _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.method = fields.get('method')
+            self.host = fields.get('host')
+            self.path = fields.get('path')
+            self.user_agent = fields.get('user_agent')
+            self.status_code = fields.get('status_code')
+            self.status_reason = fields.get('status_reason')
+            self.headers = fields.get('headers') or {}
+            self.content_type = fields.get('content_type')
+            self.content_length = fields.get('content_length')
+            self.version = fields.get('version')
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'method': method, 'host': host, 'path': path,
-                'user_agent': user_agent, 'status_code': status_code,
-                'status_reason': status_reason,
-                'headers': headers if headers is not None else {},
-                'content_type': content_type, 'content_length': content_length,
-                'version': version, '_raw': _raw,
-            })
-
-    @property
-    def method(self): return self._fields.get('method')
-    @method.setter
-    def method(self, v): self._fields['method'] = v
-
-    @property
-    def host(self): return self._fields.get('host')
-    @host.setter
-    def host(self, v): self._fields['host'] = v
-
-    @property
-    def path(self): return self._fields.get('path')
-    @path.setter
-    def path(self, v): self._fields['path'] = v
-
-    @property
-    def user_agent(self): return self._fields.get('user_agent')
-    @user_agent.setter
-    def user_agent(self, v): self._fields['user_agent'] = v
-
-    @property
-    def status_code(self): return self._fields.get('status_code')
-    @status_code.setter
-    def status_code(self, v): self._fields['status_code'] = v
-
-    @property
-    def status_reason(self): return self._fields.get('status_reason')
-    @status_reason.setter
-    def status_reason(self, v): self._fields['status_reason'] = v
-
-    @property
-    def headers(self) -> dict[str, str]: return self._fields.get('headers', {})
-    @headers.setter
-    def headers(self, v): self._fields['headers'] = v
-
-    @property
-    def content_type(self): return self._fields.get('content_type')
-    @content_type.setter
-    def content_type(self, v): self._fields['content_type'] = v
-
-    @property
-    def content_length(self): return self._fields.get('content_length')
-    @content_length.setter
-    def content_length(self, v): self._fields['content_length'] = v
-
-    @property
-    def version(self): return self._fields.get('version')
-    @version.setter
-    def version(self, v): self._fields['version'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.method = method
+            self.host = host
+            self.path = path
+            self.user_agent = user_agent
+            self.status_code = status_code
+            self.status_reason = status_reason
+            self.headers = headers if headers is not None else {}
+            self.content_type = content_type
+            self.content_length = content_length
+            self.version = version
+            self._raw = _raw
 
     @property
     def is_request(self) -> bool: return self.method is not None
@@ -805,79 +585,48 @@ class HTTPInfo(ProtocolInfo):
 
     def merge(self, other: 'HTTPInfo') -> None:
         """Merge another HTTPInfo (first-wins for scalars, merge dicts)."""
-        for k, v in other._fields.items():
-            cur = self._fields.get(k)
+        for k in self._SLOT_NAMES:
+            cur = getattr(self, k)
+            v = getattr(other, k, None)
             if cur is None and v is not None:
-                self._fields[k] = v
+                setattr(self, k, v)
             elif isinstance(cur, dict) and isinstance(v, dict):
                 for hk, hv in v.items():
                     if hk not in cur:
                         cur[hk] = hv
 
 
-class DNSInfo(ProtocolInfo):
+class DNSInfo(_SlottedInfoBase):
     """DNS protocol information."""
-    __slots__ = ()
+    __slots__ = ('queries', 'answers', 'response_code', 'question_count',
+                 'answer_count', 'authority_count', 'additional_count', 'flags', '_raw')
+    _SLOT_NAMES = ('queries', 'answers', 'response_code', 'question_count',
+                   'answer_count', 'authority_count', 'additional_count', 'flags', '_raw')
 
     def __init__(self, queries=None, answers=None, response_code=0,
                  question_count=0, answer_count=0, authority_count=0,
                  additional_count=0, flags=0, _raw=b"",
                  fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.queries = fields.get('queries') or []
+            self.answers = fields.get('answers') or []
+            self.response_code = fields.get('response_code', 0)
+            self.question_count = fields.get('question_count', 0)
+            self.answer_count = fields.get('answer_count', 0)
+            self.authority_count = fields.get('authority_count', 0)
+            self.additional_count = fields.get('additional_count', 0)
+            self.flags = fields.get('flags', 0)
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'queries': queries if queries is not None else [],
-                'answers': answers if answers is not None else [],
-                'response_code': response_code, 'question_count': question_count,
-                'answer_count': answer_count, 'authority_count': authority_count,
-                'additional_count': additional_count, 'flags': flags, '_raw': _raw,
-            })
-
-    @property
-    def queries(self) -> list[str]: return self._fields.get('queries', [])
-    @queries.setter
-    def queries(self, v): self._fields['queries'] = v
-
-    @property
-    def answers(self) -> list[str]: return self._fields.get('answers', [])
-    @answers.setter
-    def answers(self, v): self._fields['answers'] = v
-
-    @property
-    def response_code(self) -> int: return self._fields.get('response_code', 0)
-    @response_code.setter
-    def response_code(self, v): self._fields['response_code'] = v
-
-    @property
-    def question_count(self) -> int: return self._fields.get('question_count', 0)
-    @question_count.setter
-    def question_count(self, v): self._fields['question_count'] = v
-
-    @property
-    def answer_count(self) -> int: return self._fields.get('answer_count', 0)
-    @answer_count.setter
-    def answer_count(self, v): self._fields['answer_count'] = v
-
-    @property
-    def authority_count(self) -> int: return self._fields.get('authority_count', 0)
-    @authority_count.setter
-    def authority_count(self, v): self._fields['authority_count'] = v
-
-    @property
-    def additional_count(self) -> int: return self._fields.get('additional_count', 0)
-    @additional_count.setter
-    def additional_count(self, v): self._fields['additional_count'] = v
-
-    @property
-    def flags(self) -> int: return self._fields.get('flags', 0)
-    @flags.setter
-    def flags(self, v): self._fields['flags'] = v
-
-    @property
-    def _raw(self) -> bytes: return self._fields.get('_raw', b"")
-    @_raw.setter
-    def _raw(self, v): self._fields['_raw'] = v
+            self.queries = queries if queries is not None else []
+            self.answers = answers if answers is not None else []
+            self.response_code = response_code
+            self.question_count = question_count
+            self.answer_count = answer_count
+            self.authority_count = authority_count
+            self.additional_count = additional_count
+            self.flags = flags
+            self._raw = _raw
 
     @property
     def is_query(self) -> bool: return not bool(self.flags & 0x8000)
@@ -886,16 +635,17 @@ class DNSInfo(ProtocolInfo):
 
     def merge(self, other: 'DNSInfo') -> None:
         """Merge another DNSInfo (first-wins for scalars, extend lists)."""
-        for k, v in other._fields.items():
-            cur = self._fields.get(k)
+        for k in self._SLOT_NAMES:
+            cur = getattr(self, k)
+            v = getattr(other, k, None)
             if cur is None and v is not None:
-                self._fields[k] = v
+                setattr(self, k, v)
             elif isinstance(cur, list) and isinstance(v, list):
                 for item in v:
                     if item not in cur:
                         cur.append(item)
             elif (cur is None or cur == 0) and v:
-                self._fields[k] = v
+                setattr(self, k, v)
 
 
 # Map from short property names to layer registry names

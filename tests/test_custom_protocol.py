@@ -14,7 +14,7 @@ import struct
 import tempfile
 import pytest
 
-from wa1kpcap.core.packet import ProtocolInfo, ProtocolRegistry, ParsedPacket
+from wa1kpcap.core.packet import ProtocolInfo, _ProtocolInfoBase, ProtocolRegistry, ParsedPacket
 
 
 # ── Custom ProtocolInfo subclass ──
@@ -350,7 +350,7 @@ class TestCustomProtocolFlowAggregation:
         flow_layers = {}
         for pkt in [pkt1, pkt2]:
             for layer_name, layer_info in pkt.layers.items():
-                if isinstance(layer_info, ProtocolInfo):
+                if isinstance(layer_info, _ProtocolInfoBase):
                     existing = flow_layers.get(layer_name)
                     if existing is None:
                         flow_layers[layer_name] = layer_info.copy()
@@ -384,7 +384,7 @@ class TestCustomProtocolBuildExtProtocol:
         flow.packets.append(pkt)
         # Copy layers from packet to flow (simulating aggregation)
         for name, info in pkt.layers.items():
-            if isinstance(info, ProtocolInfo):
+            if isinstance(info, _ProtocolInfoBase):
                 flow.layers[name] = info.copy()
 
         stack = flow.build_ext_protocol()
