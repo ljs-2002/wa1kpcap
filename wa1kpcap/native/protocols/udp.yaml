@@ -18,6 +18,6 @@ fields:
     format: uint
 
 next_protocol:
-  field: dst_port
+  field: [dst_port, src_port]
   mapping:
     53: dns

@@ -36,9 +36,8 @@ class NativeEngine:
     ) -> Iterator:
         """Iterate over packets in a pcap file, yielding ParsedPacket.
 
-        Uses raw-byte BPF pre-filtering to skip non-matching packets
-        before full protocol parsing. C++ directly constructs Python
-        dataclass objects, bypassing dict + converter.py overhead.
+        Uses NativePipeline: fused read→filter→parse→dataclass in a single
+        C++ loop, eliminating per-packet Python↔C++ boundary crossing.
 
         Args:
             pcap_path: Path to pcap/pcapng file
@@ -47,30 +46,10 @@ class NativeEngine:
         Yields:
             ParsedPacket objects (Python dataclasses, fast attribute access)
         """
-        reader = self._native.NativePcapReader(str(pcap_path))
-        bpf = self._filter
-        can_raw = self._filter_can_raw
-        parse = self._parser.parse_to_dataclass
-
-        with reader:
-            for ts, raw_data, caplen, wirelen, pkt_link_type in reader:
-                # Fast raw-byte pre-filter (skips full parse for non-matching)
-                if bpf and can_raw:
-                    if not bpf.matches_raw(raw_data, pkt_link_type):
-                        continue
-
-                # App-layer filter needs parsed dict (fallback path)
-                if bpf and not can_raw:
-                    parsed_dict = self._parser.parse_packet(
-                        raw_data, pkt_link_type, save_raw_bytes
-                    )
-                    if not bpf.matches(parsed_dict):
-                        continue
-
-                # C++ parse → directly construct Python dataclasses
-                pkt = parse(raw_data, pkt_link_type, save_raw_bytes,
-                            ts, caplen, wirelen)
-                yield pkt
+        pipeline = self._native.NativePipeline(
+            str(pcap_path), self._parser, self._filter, save_raw_bytes)
+        with pipeline:
+            yield from pipeline
 
     def create_flow_buffer(self):
         """Create a new FlowBuffer for TCP stream reassembly bridge."""

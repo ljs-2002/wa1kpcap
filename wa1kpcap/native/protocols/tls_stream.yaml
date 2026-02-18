@@ -1,0 +1,6 @@
+name: tls_stream
+fields:
+  - name: records
+    type: repeat
+    sub_protocol: tls_record
+    merge: tls

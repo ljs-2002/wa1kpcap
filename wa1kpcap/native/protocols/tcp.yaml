@@ -61,3 +61,15 @@ fields:
   - name: flags
     type: computed
     expression: fin + syn * 2 + rst * 4 + psh * 8 + ack * 16 + urg * 32 + ece * 64 + cwr * 128
+
+next_protocol:
+  heuristics:
+    - protocol: tls_stream
+      min_length: 5
+      conditions:
+        - offset: 0
+          byte_in: [0x14, 0x15, 0x16, 0x17]
+        - offset: 1
+          byte_eq: 3
+        - offset: 2
+          byte_le: 4

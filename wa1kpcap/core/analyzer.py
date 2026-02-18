@@ -359,6 +359,8 @@ class Wa1kPcap:
                     if reassembled is None:
                         continue
                     self._reparse_transport_layer(reassembled, pkt)
+                    # Invalidate cached flow key — ports changed after reparse
+                    pkt._flow_key_cache = None
                     if pkt.ip:
                         pkt.ip.flags = 0
                         pkt.ip.offset = 0
@@ -422,186 +424,72 @@ class Wa1kPcap:
         return flows
 
     def _aggregate_flow_info(self, flow: Flow) -> None:
-        """Aggregate packet-level protocol info to flow-level."""
-        from wa1kpcap.core.packet import TLSInfo, HTTPInfo, DNSInfo
-        from wa1kpcap.protocols.application import TLSFlowState, parse_cert_der
+        """Aggregate packet-level protocol info to flow-level using generic merge."""
+        from wa1kpcap.core.packet import ProtocolInfo, TLSInfo
+        from wa1kpcap.protocols.application import TLSFlowState
 
-        # First, extract ALL TLS info from flow._tls_state if available
+        # 1. Extract TLS info from flow._tls_state (dpkt reassembly path)
         if flow._tls_state and isinstance(flow._tls_state, TLSFlowState):
-            tls_state = flow._tls_state
+            self._merge_tls_state_to_flow(flow, flow._tls_state)
 
-            # Create TLSInfo if not exists
-            if not flow.tls:
-                flow.tls = TLSInfo(version=tls_state.version, content_type=22, record_length=0)
-
-            # Copy version
-            if not flow.tls.version and tls_state.version:
-                flow.tls.version = tls_state.version
-
-            # Copy SNI (always list)
-            if tls_state.sni:
-                flow.tls.sni.extend(tls_state.sni)
-
-            # Copy ALPN (always list)
-            if tls_state.alpn:
-                flow.tls.alpn.extend(tls_state.alpn)
-
-            # Copy cipher suites
-            if tls_state.c_ciphersuites:
-                flow.tls.cipher_suites.extend(tls_state.c_ciphersuites)
-
-            # Copy cipher suite
-            if tls_state.s_ciphersuite and not flow.tls.cipher_suite:
-                flow.tls.cipher_suite = tls_state.s_ciphersuite
-
-            # Copy signature algorithms
-            if tls_state.signature_algorithms:
-                flow.tls.signature_algorithms.extend(tls_state.signature_algorithms)
-
-            # Copy supported groups
-            if tls_state.supported_groups:
-                flow.tls.supported_groups.extend(tls_state.supported_groups)
-
-            # Copy extensions (as dict {ext_type: [ext_data1, ext_data2, ...]})
-            if tls_state.exts:
-                for ext_type, ext_data_list in tls_state.exts.items():
-                    if ext_type not in flow.tls.exts:
-                        flow.tls.exts[ext_type] = []
-                    for ext_data in ext_data_list:
-                        ext_bytes = bytes(ext_data)
-                        if ext_bytes not in flow.tls.exts[ext_type]:
-                            flow.tls.exts[ext_type].append(ext_bytes)
-
-                # Also populate legacy extensions list for backward compatibility
-                for ext_type, ext_data_list in tls_state.exts.items():
-                    for ext_data in ext_data_list:
-                        ext_tuple = (ext_type, bytes(ext_data))
-                        if ext_tuple not in flow.tls.extensions:
-                            flow.tls.extensions.append(ext_tuple)
-
-            # Parse and copy certificates
-            if tls_state.certs and not flow.tls.certificates:
-                cert_infos = []
-                for cert_der in tls_state.certs:
-                    cert_info = parse_cert_der(bytes(cert_der))
-                    if cert_info:
-                        cert_infos.append(cert_info)
-                if cert_infos:
-                    flow.tls.certificates = cert_infos
-                    flow.tls.certificate = cert_infos[0]
-
-        # Aggregate TLS info from packets (merge additional info not in _tls_state)
+        # 2. Generic merge: iterate all packets, merge each layer via ProtocolInfo.merge()
         for pkt in flow.packets:
-            if pkt.tls:
-                # Initialize flow.tls if not set
-                if not flow.tls:
-                    # For NativeTLSInfo (C++ struct), create a Python TLSInfo copy
-                    try:
-                        flow.tls = pkt.tls
-                    except (TypeError, AttributeError):
-                        flow.tls = TLSInfo(
-                            version=getattr(pkt.tls, 'version', None),
-                            content_type=getattr(pkt.tls, 'content_type', None),
-                            record_length=getattr(pkt.tls, 'record_length', 0),
-                        )
-                # Otherwise, merge additional info
+            for layer_name, layer_info in pkt.layers.items():
+                if not isinstance(layer_info, ProtocolInfo):
+                    continue
+                existing = flow.layers.get(layer_name)
+                if existing is None:
+                    # First occurrence — clone with deep-copied mutables
+                    flow.layers[layer_name] = layer_info.copy()
                 else:
-                    try:
-                        # Merge versions
-                        if pkt.tls.version and not flow.tls.version:
-                            flow.tls.version = pkt.tls.version
+                    existing.merge(layer_info)
 
-                        # Merge SNI (both are lists for Python TLSInfo)
-                        pkt_sni = getattr(pkt.tls, 'sni', None)
-                        if pkt_sni:
-                            # NativeTLSInfo.sni is a string; Python TLSInfo.sni is a list
-                            sni_list = [pkt_sni] if isinstance(pkt_sni, str) else pkt_sni
-                            for s in sni_list:
-                                if s and s not in flow.tls.sni:
-                                    flow.tls.sni.append(s)
+        # 3. Native engine: certificates from reassembly
+        native_certs = getattr(flow, '_native_certs', None)
+        if native_certs and flow.tls and not flow.tls.certificates:
+            flow.tls.certificates = [bytes(c) for c in native_certs]
+            flow.tls.certificate = flow.tls.certificates[0]
 
-                        # Merge ALPN (both are lists)
-                        pkt_alpn = getattr(pkt.tls, 'alpn', None)
-                        if pkt_alpn:
-                            for a in pkt_alpn:
-                                if a not in flow.tls.alpn:
-                                    flow.tls.alpn.append(a)
-
-                        # Merge cipher suite
-                        pkt_cs = getattr(pkt.tls, 'cipher_suite', None)
-                        if pkt_cs and not flow.tls.cipher_suite:
-                            flow.tls.cipher_suite = pkt_cs
-
-                        # Merge cipher suites
-                        pkt_css = getattr(pkt.tls, 'cipher_suites', None)
-                        if pkt_css:
-                            for cs in pkt_css:
-                                if cs not in flow.tls.cipher_suites:
-                                    flow.tls.cipher_suites.append(cs)
-
-                        # Merge signature algorithms
-                        pkt_sa = getattr(pkt.tls, 'signature_algorithms', None)
-                        if pkt_sa:
-                            for alg in pkt_sa:
-                                if alg not in flow.tls.signature_algorithms:
-                                    flow.tls.signature_algorithms.append(alg)
-
-                        # Merge supported groups
-                        pkt_sg = getattr(pkt.tls, 'supported_groups', None)
-                        if pkt_sg:
-                            for sg in pkt_sg:
-                                if sg not in flow.tls.supported_groups:
-                                    flow.tls.supported_groups.append(sg)
-
-                        # Merge certificate info
-                        pkt_cert = getattr(pkt.tls, 'certificate', None)
-                        if pkt_cert and not flow.tls.certificate:
-                            flow.tls.certificate = pkt_cert
-
-                        # Merge certificate chain
-                        pkt_certs = getattr(pkt.tls, 'certificates', None)
-                        if pkt_certs:
-                            for cert in pkt_certs:
-                                if cert not in flow.tls.certificates:
-                                    flow.tls.certificates.append(cert)
-
-                        # Merge exts
-                        pkt_exts = getattr(pkt.tls, 'exts', None)
-                        if pkt_exts:
-                            for ext_type, ext_data_list in pkt_exts.items():
-                                if ext_type not in flow.tls.exts:
-                                    flow.tls.exts[ext_type] = []
-                                for ext_data in ext_data_list:
-                                    if ext_data not in flow.tls.exts[ext_type]:
-                                        flow.tls.exts[ext_type].append(ext_data)
-
-                        # Merge legacy extensions list
-                        pkt_extensions = getattr(pkt.tls, 'extensions', None)
-                        if pkt_extensions:
-                            for ext in pkt_extensions:
-                                if ext not in flow.tls.extensions:
-                                    flow.tls.extensions.append(ext)
-                    except (TypeError, AttributeError):
-                        pass  # NativeTLSInfo may lack some attributes
-
-        # Aggregate HTTP info
-        for pkt in flow.packets:
-            pkt_http = getattr(pkt, 'http', None)
-            if pkt_http and not flow.http:
-                flow.http = pkt_http
-                if getattr(pkt_http, 'host', None) or getattr(pkt_http, 'user_agent', None):
-                    break
-
-        # Aggregate DNS info
-        for pkt in flow.packets:
-            pkt_dns = getattr(pkt, 'dns', None)
-            if pkt_dns and not flow.dns:
-                flow.dns = pkt_dns
-                if getattr(pkt_dns, 'queries', None):
-                    break
-
-        # Build extended protocol stack
+        # 4. Build extended protocol stack
         flow.build_ext_protocol()
+
+    def _merge_tls_state_to_flow(self, flow: Flow, tls_state) -> None:
+        """Convert TLSFlowState (dpkt reassembly) into flow.tls via merge."""
+        from wa1kpcap.core.packet import TLSInfo
+
+        if not flow.tls:
+            flow.tls = TLSInfo(version=tls_state.version, content_type=22, record_length=0)
+
+        if not flow.tls.version and tls_state.version:
+            flow.tls.version = tls_state.version
+        if tls_state.sni:
+            flow.tls.sni.extend(tls_state.sni)
+        if tls_state.alpn:
+            flow.tls.alpn.extend(tls_state.alpn)
+        if tls_state.c_ciphersuites:
+            flow.tls.cipher_suites.extend(tls_state.c_ciphersuites)
+        if tls_state.s_ciphersuite and not flow.tls.cipher_suite:
+            flow.tls.cipher_suite = tls_state.s_ciphersuite
+        if tls_state.signature_algorithms:
+            flow.tls.signature_algorithms.extend(tls_state.signature_algorithms)
+        if tls_state.supported_groups:
+            flow.tls.supported_groups.extend(tls_state.supported_groups)
+        if tls_state.exts:
+            for ext_type, ext_data_list in tls_state.exts.items():
+                if ext_type not in flow.tls.exts:
+                    flow.tls.exts[ext_type] = []
+                for ext_data in ext_data_list:
+                    ext_bytes = bytes(ext_data)
+                    if ext_bytes not in flow.tls.exts[ext_type]:
+                        flow.tls.exts[ext_type].append(ext_bytes)
+            for ext_type, ext_data_list in tls_state.exts.items():
+                for ext_data in ext_data_list:
+                    ext_tuple = (ext_type, bytes(ext_data))
+                    if ext_tuple not in flow.tls.extensions:
+                        flow.tls.extensions.append(ext_tuple)
+        if tls_state.certs and not flow.tls.certificates:
+            flow.tls.certificates = [bytes(c) for c in tls_state.certs]
+            flow.tls.certificate = flow.tls.certificates[0]
 
     def _process_packet(self, ts: float, buf: bytes, reader: PcapReader) -> None:
         """Process a single packet."""
@@ -1090,8 +978,22 @@ class Wa1kPcap:
             if tcp_data and pkt.tcp:
                 port = pkt.tcp.dport
                 sport = pkt.tcp.sport
-                # TLS ports
-                if port in (443, 465, 993, 995, 5061) or sport in (443, 465, 993, 995, 5061):
+                is_tls_port = port in (443, 465, 993, 995, 5061) or sport in (443, 465, 993, 995, 5061)
+                flow_has_tls = getattr(flow, '_native_tls_detected', False)
+
+                if is_tls_port or flow_has_tls:
+                    if pkt.tls is not None:
+                        flow._native_tls_detected = True
+                    # Clear TLS info from initial C++ parse — the reassembly
+                    # code will re-parse with proper CCS state tracking.
+                    pkt.tls = None
+                    is_forward = self._is_packet_forward(pkt, flow)
+                    direction = 1 if is_forward else -1
+                    self._handle_native_tls_reassembly(tcp_data, pkt, flow, direction)
+                elif pkt.tls is not None:
+                    # Heuristic detected TLS on non-standard port — mark and re-parse
+                    flow._native_tls_detected = True
+                    pkt.tls = None
                     is_forward = self._is_packet_forward(pkt, flow)
                     direction = 1 if is_forward else -1
                     self._handle_native_tls_reassembly(tcp_data, pkt, flow, direction)
@@ -1112,9 +1014,18 @@ class Wa1kPcap:
     def _handle_native_tls_reassembly(
         self, data: bytes, pkt: ParsedPacket, flow: Flow, direction: int
     ) -> None:
-        """Buffer TCP payload, extract complete TLS records, parse via C++ engine."""
+        """Buffer TCP payload, extract complete TLS records, parse via C++ engine.
+
+        The C++ parse_tls_record now handles multi-record and multi-handshake
+        splitting internally via parse_tls_stream. Python only needs to manage
+        the incomplete-data buffer and CCS skip state.
+        """
         buf = flow._tls_incomplete_data.get(direction, b"")
         full = buf + data
+
+        # After ChangeCipherSpec, the next handshake record is the encrypted
+        # Finished — skip it, then resume parsing (handles renegotiation).
+        ccs_skip = getattr(flow, '_tls_ccs_skip', set())
 
         offset = 0
         while offset + 5 <= len(full):
@@ -1127,18 +1038,39 @@ class Wa1kPcap:
             if offset + 5 + record_len > len(full):
                 break  # Incomplete record, wait for more data
 
-            # Complete TLS record — only parse handshake (content_type=22)
-            if content_type == 22:
-                record = full[offset:offset + 5 + record_len]
-                self._parse_native_tls_record(record, pkt, flow)
+            if content_type == 20:  # ChangeCipherSpec
+                ccs_skip.add(direction)
+                flow._tls_ccs_skip = ccs_skip
+            elif content_type == 22:
+                if direction in ccs_skip:
+                    # Validate: real plaintext handshake vs encrypted Finished
+                    body = full[offset + 5:offset + 5 + record_len]
+                    is_valid_hs = (
+                        len(body) >= 4
+                        and int.from_bytes(body[1:4], 'big') == len(body) - 4
+                    )
+                    ccs_skip.discard(direction)
+                    flow._tls_ccs_skip = ccs_skip
+                    if is_valid_hs:
+                        record = full[offset:offset + 5 + record_len]
+                        self._parse_native_tls_chunk(record, pkt, flow)
+                    # else: encrypted Finished — skip
+                else:
+                    record = full[offset:offset + 5 + record_len]
+                    self._parse_native_tls_chunk(record, pkt, flow)
+            elif content_type == 23:  # Application Data
+                # Ensure pkt.tls is set so app-data-only flows are counted
+                if pkt.tls is None:
+                    from wa1kpcap.core.packet import TLSInfo
+                    pkt.tls = TLSInfo(content_type=23)
             offset += 5 + record_len
 
         flow._tls_incomplete_data[direction] = full[offset:]
 
-    def _parse_native_tls_record(
+    def _parse_native_tls_chunk(
         self, record: bytes, pkt: ParsedPacket, flow: Flow
     ) -> None:
-        """Parse a complete TLS record using C++ engine, update flow TLS state."""
+        """Parse a TLS chunk (one or more records) via C++ engine, merge into pkt.tls."""
         from wa1kpcap.core.packet import TLSInfo
 
         result = self._native_engine.parse_tls_record(record)
@@ -1149,49 +1081,73 @@ class Wa1kPcap:
         if tls is None:
             return
 
-        # Merge into packet's TLS info (create if needed)
+        # Track all handshake types seen in this flow
+        ht_list = getattr(tls, 'handshake_types', None)
+        hs_types = ht_list or ([tls.handshake_type] if tls.handshake_type >= 0 else [])
+
+        # Extract raw certificates from Certificate handshake (type 11)
+        if 11 in hs_types:
+            self._extract_native_certs(record, flow)
+
+        # Convert NativeTLSInfo to TLSInfo
+        sni_val = tls.sni
+        sni_list = [sni_val] if sni_val and isinstance(sni_val, str) else []
+        parsed = TLSInfo(
+            version=tls.version if tls.version else None,
+            content_type=tls.content_type if tls.content_type >= 0 else None,
+            handshake_type=tls.handshake_type if tls.handshake_type >= 0 else None,
+            record_length=tls.record_length,
+            sni=sni_list,
+            cipher_suites=list(tls.cipher_suites) if tls.cipher_suites else [],
+            cipher_suite=tls.cipher_suite if tls.cipher_suite >= 0 else None,
+            alpn=list(tls.alpn) if tls.alpn else [],
+            signature_algorithms=list(tls.signature_algorithms) if tls.signature_algorithms else [],
+            supported_groups=list(tls.supported_groups) if tls.supported_groups else [],
+            _handshake_types=list(hs_types),
+        )
+
+        # Merge into packet's TLS info
         if pkt.tls is None:
-            pkt.tls = TLSInfo(
-                version=tls.version if tls.version else None,
-                content_type=tls.content_type if tls.content_type >= 0 else None,
-                handshake_type=tls.handshake_type if tls.handshake_type >= 0 else None,
-                record_length=tls.record_length,
-            )
+            pkt.tls = parsed
+        else:
+            pkt.tls.merge(parsed)
 
-        info = pkt.tls
+    def _extract_native_certs(self, record: bytes, flow: Flow) -> None:
+        """Extract raw DER certificates from a TLS Certificate handshake record.
 
-        # Merge SNI
-        if tls.sni:
-            if not info.sni:
-                info.sni = []
-            if tls.sni not in info.sni:
-                info.sni.append(tls.sni)
-
-        # Merge cipher_suites (ClientHello)
-        if tls.cipher_suites and not info.cipher_suites:
-            info.cipher_suites = list(tls.cipher_suites)
-            info.handshake_type = 1
-
-        # Merge cipher_suite (ServerHello)
-        if tls.cipher_suite >= 0 and info.cipher_suite is None:
-            info.cipher_suite = tls.cipher_suite
-            info.handshake_type = 2
-
-        # Merge ALPN
-        if tls.alpn and not info.alpn:
-            info.alpn = list(tls.alpn)
-
-        # Merge signature_algorithms
-        if tls.signature_algorithms and not info.signature_algorithms:
-            info.signature_algorithms = list(tls.signature_algorithms)
-
-        # Merge supported_groups
-        if tls.supported_groups and not info.supported_groups:
-            info.supported_groups = list(tls.supported_groups)
-
-        # Merge version
-        if tls.version and not info.version:
-            info.version = tls.version
+        TLS record format: [content_type(1)][version(2)][length(2)][body...]
+        Handshake body:    [hs_type(1)][hs_length(3)][certs_length(3)][cert_list...]
+        Each cert:         [cert_length(3)][DER bytes...]
+        """
+        if len(record) < 5:
+            return
+        body = record[5:]  # skip TLS record header
+        # Walk handshake messages in the body
+        off = 0
+        while off + 4 <= len(body):
+            hs_type = body[off]
+            hs_len = int.from_bytes(body[off + 1:off + 4], 'big')
+            if off + 4 + hs_len > len(body):
+                break
+            if hs_type == 11:  # Certificate
+                hs_body = body[off + 4:off + 4 + hs_len]
+                if len(hs_body) < 3:
+                    break
+                certs_len = int.from_bytes(hs_body[0:3], 'big')
+                certs_data = hs_body[3:3 + certs_len]
+                certs = []
+                c_off = 0
+                while c_off + 3 <= len(certs_data):
+                    c_len = int.from_bytes(certs_data[c_off:c_off + 3], 'big')
+                    if c_off + 3 + c_len > len(certs_data):
+                        break
+                    certs.append(certs_data[c_off + 3:c_off + 3 + c_len])
+                    c_off += 3 + c_len
+                if certs:
+                    if not hasattr(flow, '_native_certs'):
+                        flow._native_certs = []
+                    flow._native_certs = certs
+            off += 4 + hs_len
 
     def _parse_application_with_buffering(
         self, data: bytes, pkt: ParsedPacket, flow: Flow, direction: int
@@ -1227,7 +1183,7 @@ class Wa1kPcap:
         self, data: bytes, pkt: ParsedPacket, flow: Flow, direction: int
     ) -> None:
         """Parse TLS with per-flow incomplete data buffering."""
-        from wa1kpcap.protocols.application import parse_tls, TLSFlowState, parse_cert_der
+        from wa1kpcap.protocols.application import parse_tls, TLSFlowState
         from wa1kpcap.core.packet import TLSInfo
 
         # Get or create TLS incomplete data buffer for this direction
@@ -1299,16 +1255,10 @@ class Wa1kPcap:
                     if ext_tuple not in tls_info.extensions:
                         tls_info.extensions.append(ext_tuple)
 
-        # Set certificates if available
+        # Set raw DER certificate bytes if available
         if parsed_tls.certs:
-            cert_infos = []
-            for cert_der in parsed_tls.certs:
-                cert_info = parse_cert_der(bytes(cert_der))
-                if cert_info:
-                    cert_infos.append(cert_info)
-            if cert_infos:
-                tls_info.certificates = cert_infos
-                tls_info.certificate = cert_infos[0]
+            tls_info.certificates = [bytes(c) for c in parsed_tls.certs]
+            tls_info.certificate = tls_info.certificates[0]
 
         # Attach to packet (may fail for NativeParsedPacket C++ struct)
         try:

@@ -25,7 +25,7 @@ Example usage:
 
 from wa1kpcap.core.analyzer import Wa1kPcap
 from wa1kpcap.core.flow import Flow, FlowKey, FlowManager, TCPState
-from wa1kpcap.core.packet import ParsedPacket, Layer
+from wa1kpcap.core.packet import ParsedPacket, Layer, ProtocolInfo, ProtocolRegistry
 from wa1kpcap.core.reader import PcapReader
 from wa1kpcap.core.filter import PacketFilter, compile_filter, BPFCompiler
 from wa1kpcap.protocols.base import BaseProtocolHandler, ProtocolContext, ParseResult
@@ -59,6 +59,8 @@ __all__ = [
     'TCPState',
     'ParsedPacket',
     'Layer',
+    'ProtocolInfo',
+    'ProtocolRegistry',
     'PcapReader',
 
     # Filtering

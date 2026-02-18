@@ -11,10 +11,11 @@ from wa1kpcap.core.packet import (
     TCPInfo,
     UDPInfo,
     ICMPInfo,
+    ARPInfo,
+    ICMP6Info,
     TLSInfo,
     HTTPInfo,
     DNSInfo,
-    CertificateInfo
 )
 from wa1kpcap.core.reader import PcapReader, LinkLayerType
 
@@ -33,10 +34,11 @@ __all__ = [
     'TCPInfo',
     'UDPInfo',
     'ICMPInfo',
+    'ARPInfo',
+    'ICMP6Info',
     'TLSInfo',
     'HTTPInfo',
     'DNSInfo',
-    'CertificateInfo',
     'PcapReader',
     'LinkLayerType',
 ]

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["scikit-build-core>=0.5", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "wa1kpcap"
+version = "0.1.0"
+description = "Python PCAP Analysis Library with optional native C++ engine"
+requires-python = ">=3.10"
+dependencies = [
+    "dpkt>=1.9",
+]
+
+[project.optional-dependencies]
+native = [
+    "pybind11>=2.11",
+    "PyYAML>=6.0",
+]
+dev = [
+    "pytest>=7.0",
+    "scapy>=2.5",
+]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+wheel.packages = ["wa1kpcap"]
+build-dir = "build/{wheel_tag}"
+cmake.source-dir = "."
+
+[tool.scikit-build.cmake.define]
+BUILD_NATIVE = "ON"

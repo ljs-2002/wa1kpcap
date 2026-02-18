@@ -14,3 +14,4 @@ next_protocol:
   mapping:
     1: tls_client_hello
     2: tls_server_hello
+    11: tls_certificate
