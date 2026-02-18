@@ -1,8 +1,66 @@
 # Add a Built-in Protocol / 添加内置协议
 
-This guide walks through adding a new built-in protocol to wa1kpcap, using **ARP** as a worked example. Built-in protocols get a C++ fast-path for maximum performance.
+This guide walks through adding a new built-in protocol to wa1kpcap. Built-in protocols have C++ struct fields on `NativeParsedPacket` and typed Python properties on `ParsedPacket`.
 
-本指南以 **ARP** 为例，演示如何向 wa1kpcap 添加内置协议。内置协议拥有 C++ 快速路径以获得最佳性能。
+本指南演示如何向 wa1kpcap 添加内置协议。内置协议在 `NativeParsedPacket` 上有 C++ 结构体字段，在 `ParsedPacket` 上有类型化 Python 属性。
+
+## Two Subtypes of Built-in Protocols / 内置协议的两种子类型
+
+Built-in protocols come in two flavors depending on whether they implement a C++ fast-path parser:
+
+内置协议根据是否实现 C++ 快速路径解析器分为两种：
+
+### Type A: Fast-Path Protocol (fast_parse + fill) / 快速路径协议
+
+Has both `fast_parse_xxx()` (parses raw bytes directly) and `fill_xxx()` (populates struct from YAML FieldMap). The fast-path is used in the hot loop for maximum throughput.
+
+同时拥有 `fast_parse_xxx()`（直接解析原始字节）和 `fill_xxx()`（从 YAML FieldMap 填充结构体）。快速路径在热循环中使用以获得最大吞吐量。
+
+**Current fast-path protocols / 当前快速路径协议:** Ethernet, IPv4, IPv6, TCP, UDP, ARP, ICMP, ICMPv6
+
+### Type B: Fill-Only Protocol (fill only) / 仅填充协议
+
+Has only `fill_xxx()` — no `fast_parse_xxx()`. Parsing is always done by the YAML slow-path engine; the fill function just copies parsed fields into the C++ struct for typed access.
+
+仅有 `fill_xxx()`——没有 `fast_parse_xxx()`。解析始终由 YAML 慢路径引擎完成；fill 函数只是将解析后的字段复制到 C++ 结构体以提供类型化访问。
+
+**Current fill-only protocols / 当前仅填充协议:** DNS, TLS (tls_stream, tls_record, tls_handshake, tls_client_hello, tls_server_hello, tls_certificate)
+
+### How to Choose / 如何选择
+
+```
+Should I implement fast_parse_xxx?
+是否应该实现 fast_parse_xxx？
+│
+├─ Is the wire format simple and fixed-layout?
+│  线上格式是否简单且固定布局？
+│  (fixed offsets, no variable-length lists, no compression)
+│  （固定偏移、无变长列表、无压缩）
+│  │
+│  ├─ YES → Type A: Fast-Path
+│  │  Examples: Ethernet (14 bytes fixed), ARP (28 bytes fixed),
+│  │  ICMP (fixed header), IPv4/IPv6 (fixed header + options),
+│  │  TCP/UDP (fixed header)
+│  │
+│  └─ NO ──┐
+│           │
+├─ Does parsing require complex logic?
+│  解析是否需要复杂逻辑？
+│  (domain name compression, TLV extensions, variable sub-layers,
+│   counted lists, conditional fields)
+│  （域名压缩、TLV 扩展、可变子层、计数列表、条件字段）
+│  │
+│  ├─ YES → Type B: Fill-Only
+│  │  Examples: DNS (name compression, variable RR lists),
+│  │  TLS (extensions, handshake sub-types, certificate chains)
+│  │
+│  └─ NO → Type A if performance matters, Type B otherwise
+│          性能重要选 A，否则选 B
+```
+
+**Rule of thumb / 经验法则:** If you can parse the protocol with simple pointer arithmetic and fixed offsets in < 50 lines of C++, use fast-path. If you'd need to reimplement what the YAML engine already handles (TLV parsing, counted lists, compression), use fill-only.
+
+如果能用简单的指针运算和固定偏移在 50 行 C++ 以内解析协议，用快速路径。如果需要重新实现 YAML 引擎已有的功能（TLV 解析、计数列表、压缩），用仅填充。
 
 ## Prerequisites / 前提条件
 
@@ -109,15 +167,18 @@ next_protocol:
 
 **Files:** `src/cpp/protocol_engine.h` (declarations), `src/cpp/protocol_engine.cpp` (implementations)
 
-You need two functions per protocol:
+The functions you need depend on the protocol subtype:
 
-每个协议需要两个函数：
+需要实现的函数取决于协议子类型：
 
-#### 4a. `fast_parse_xxx` — Fast Path / 快速路径
+- **Type A (Fast-Path):** `fast_parse_xxx` + `fill_xxx` + register both dispatch tables
+- **Type B (Fill-Only):** `fill_xxx` only + register fill dispatch table only
 
-Parses raw bytes directly into the C++ struct. This is the hot path.
+#### 4a. `fast_parse_xxx` — Fast Path (Type A only) / 快速路径（仅 A 类型）
 
-直接将原始字节解析到 C++ 结构体。这是热路径。
+Parses raw bytes directly into the C++ struct. This is the hot path. **Skip this for fill-only protocols.**
+
+直接将原始字节解析到 C++ 结构体。这是热路径。**仅填充协议跳过此步。**
 
 ```cpp
 // protocol_engine.h — declaration
@@ -145,13 +206,14 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_arp(
 }
 ```
 
-#### 4b. `fill_xxx` — Slow Path / 慢路径
+#### 4b. `fill_xxx` — Slow Path (both types) / 慢路径（两种类型都需要）
 
-Populates the C++ struct from a YAML-parsed `FieldMap` dict. Used when the fast-path is bypassed.
+Populates the C++ struct from a YAML-parsed `FieldMap` dict. For Type A, used when the fast-path is bypassed. For Type B, this is the only path.
 
-从 YAML 解析的 `FieldMap` 字典填充 C++ 结构体。在快速路径被跳过时使用。
+从 YAML 解析的 `FieldMap` 字典填充 C++ 结构体。A 类型在快速路径被跳过时使用；B 类型这是唯一路径。
 
 ```cpp
+// Type A example (ARP — simple struct fill):
 void ProtocolEngine::fill_arp(const FieldMap& fm, NativeParsedPacket& pkt) const {
     pkt.has_arp = true;
     auto& a = pkt.arp;
@@ -163,28 +225,58 @@ void ProtocolEngine::fill_arp(const FieldMap& fm, NativeParsedPacket& pkt) const
     a.target_mac = get_str(fm, "target_mac");
     a.target_ip  = get_str(fm, "target_ip");
 }
-```
 
-#### 4c. Wire into Dispatch Loop / 接入分发循环
-
-In `protocol_engine.cpp`, add to the fast-path dispatch:
-
-在 `protocol_engine.cpp` 中，添加到快速路径分发：
-
-```cpp
-} else if (current_proto == "arp") {
-    fr = fast_parse_arp(cur, remaining, pkt);
-    used_fast_path = (fr.bytes_consumed > 0);
+// Type B example (DNS — fill-only, complex parsing done by YAML engine):
+void ProtocolEngine::fill_dns(const FieldMap& fm, NativeParsedPacket& pkt) const {
+    pkt.has_dns = true;
+    auto& d = pkt.dns;
+    d.id       = get_int(fm, "id");
+    d.qr       = get_int(fm, "qr");
+    d.opcode   = get_int(fm, "opcode");
+    // ... YAML engine already handled domain name compression, RR lists, etc.
 }
 ```
 
-And to the slow-path dispatch:
+#### 4c. Register in Dispatch Tables / 注册到分发表
 
-以及慢路径分发：
+The engine uses `unordered_map` dispatch tables instead of if-else chains. Register your protocol in the `ProtocolEngine` constructor (`protocol_engine.cpp`):
+
+引擎使用 `unordered_map` 分发表而非 if-else 链。在 `ProtocolEngine` 构造函数（`protocol_engine.cpp`）中注册协议：
+
+**Type A (Fast-Path) — register in both tables:**
 
 ```cpp
-if (proto_name == "arp") fill_arp(fm, pkt);
+// In ProtocolEngine::ProtocolEngine() constructor:
+
+// fast_dispatch_: unified signature (buf, len, remaining, pkt)
+// Protocols that don't need `remaining` simply ignore it.
+fast_dispatch_["arp"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+    return fast_parse_arp(buf, len, pkt);
+};
+
+// fill_dispatch_: uses SlowFillContext
+fill_dispatch_["arp"] = [this](SlowFillContext& ctx) {
+    fill_arp(ctx.pkt, ctx.fields);
+};
 ```
+
+**Type B (Fill-Only) — register in fill table only:**
+
+```cpp
+// In ProtocolEngine::ProtocolEngine() constructor:
+
+// No fast_dispatch_ entry — YAML slow-path always handles parsing.
+// Only register fill_dispatch_:
+fill_dispatch_["dns"] = [this](SlowFillContext& ctx) {
+    fill_dns(ctx.pkt, ctx.fields);
+};
+```
+
+**Note on special cases / 特殊情况说明:**
+
+Some protocols need extra context from `SlowFillContext`. For example, TCP/UDP compute `app_len` from `ctx.remaining - ctx.bytes_consumed`. TLS sub-layers store fields into `ctx.tls_layers` for deferred processing. See existing registrations in the constructor for patterns.
+
+某些协议需要 `SlowFillContext` 中的额外上下文。例如 TCP/UDP 从 `ctx.remaining - ctx.bytes_consumed` 计算 `app_len`。TLS 子层将字段存入 `ctx.tls_layers` 以延迟处理。参见构造函数中的现有注册了解模式。
 
 ---
 
@@ -249,30 +341,48 @@ Pass `arp` to the `ParsedPacket_cls(...)` constructor call.
 
 **File:** `wa1kpcap/core/packet.py`
 
+Built-in Info classes inherit from `_SlottedInfoBase` (not `ProtocolInfo`) and store fields as direct `__slots__` attributes for performance. The `_SlottedInfoBase` base class provides `copy()`, `merge()`, `get()`, and a `_fields` property (returns a dict view of all slots).
+
+内置 Info 类继承 `_SlottedInfoBase`（而非 `ProtocolInfo`），将字段存储为直接的 `__slots__` 属性以提升性能。`_SlottedInfoBase` 基类提供 `copy()`、`merge()`、`get()` 和 `_fields` 属性（返回所有 slot 的字典视图）。
+
 ```python
-class ARPInfo(ProtocolInfo):
+class ARPInfo(_SlottedInfoBase):
     """ARP message information."""
-    __slots__ = ()
+    __slots__ = ('hw_type', 'proto_type', 'opcode',
+                 'sender_mac', 'sender_ip', 'target_mac', 'target_ip', '_raw')
+    _SLOT_NAMES = ('hw_type', 'proto_type', 'opcode',
+                   'sender_mac', 'sender_ip', 'target_mac', 'target_ip', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, '', '', '', '', b'')
 
     def __init__(self, hw_type=0, proto_type=0, opcode=0,
                  sender_mac="", sender_ip="", target_mac="", target_ip="",
                  _raw=b"", fields: dict | None = None, **kwargs):
         if fields is not None:
-            super().__init__(fields=fields, **kwargs)
+            self.hw_type = fields.get('hw_type', 0)
+            self.proto_type = fields.get('proto_type', 0)
+            self.opcode = fields.get('opcode', 0)
+            self.sender_mac = fields.get('sender_mac', "")
+            self.sender_ip = fields.get('sender_ip', "")
+            self.target_mac = fields.get('target_mac', "")
+            self.target_ip = fields.get('target_ip', "")
+            self._raw = fields.get('_raw', b"")
         else:
-            super().__init__(fields={
-                'hw_type': hw_type, 'proto_type': proto_type, 'opcode': opcode,
-                'sender_mac': sender_mac, 'sender_ip': sender_ip,
-                'target_mac': target_mac, 'target_ip': target_ip, '_raw': _raw,
-            })
-
-    @property
-    def opcode(self) -> int: return self._fields.get('opcode', 0)
-    @opcode.setter
-    def opcode(self, v): self._fields['opcode'] = v
-
-    # ... other properties
+            self.hw_type = hw_type
+            self.proto_type = proto_type
+            self.opcode = opcode
+            self.sender_mac = sender_mac
+            self.sender_ip = sender_ip
+            self.target_mac = target_mac
+            self.target_ip = target_ip
+            self._raw = _raw
 ```
+
+Key points / 要点:
+- `__slots__` lists all field names — no `_fields` dict, no property accessors needed / 列出所有字段名——无需 `_fields` 字典和 property 访问器
+- `_SLOT_NAMES` must match `__slots__` (used by `copy()`, `merge()`, `_fields` property) / 必须与 `__slots__` 一致
+- `_SLOT_DEFAULTS` provides defaults for `copy()` fallback / 为 `copy()` 回退提供默认值
+- `fields=` dict path is required for the converter/custom protocol fallback / `fields=` 字典路径用于转换器/自定义协议回退
+- If the protocol needs flow-level aggregation, override `merge(self, other)` / 如需流级聚合，重写 `merge(self, other)`
 
 Also:
 - Add to `_PROTO_KEY_TO_LAYER`: `'arp': 'arp'`
@@ -338,13 +448,18 @@ See `tests/test_arp_icmp.py` for a complete example.
 
 ## Checklist / 检查清单
 
+- [ ] Decide subtype: Type A (fast-path) or Type B (fill-only) / 决定子类型：A 类型（快速路径）或 B 类型（仅填充）
 - [ ] `src/cpp/protocol_registry.h` — X-Macro entry / X-Macro 条目
 - [ ] `src/cpp/parsed_packet.h` — C++ struct / C++ 结构体
-- [ ] `wa1kpcap/native/protocols/xxx.yaml` — YAML definition (if needed) / YAML 定义（如需要）
+- [ ] `wa1kpcap/native/protocols/xxx.yaml` — YAML definition (required for Type B, optional for Type A) / YAML 定义（B 类型必需，A 类型可选）
 - [ ] `src/cpp/protocol_engine.h` — Function declarations / 函数声明
-- [ ] `src/cpp/protocol_engine.cpp` — `fast_parse_xxx` + `fill_xxx` + dispatch wiring / 快速解析 + 填充 + 分发接入
+- [ ] `src/cpp/protocol_engine.cpp`:
+  - [ ] `fast_parse_xxx` (Type A only) / 快速解析（仅 A 类型）
+  - [ ] `fill_xxx` (both types) / 填充（两种类型都需要）
+  - [ ] Register in `fast_dispatch_` table in constructor (Type A only) / 注册到 `fast_dispatch_` 分发表（仅 A 类型）
+  - [ ] Register in `fill_dispatch_` table in constructor (both types) / 注册到 `fill_dispatch_` 分发表（两种类型都需要）
 - [ ] `src/cpp/bindings.cpp` — pybind11 struct binding + property + build helper / pybind11 绑定
-- [ ] `wa1kpcap/core/packet.py` — Python Info class + ParsedPacket integration / Python Info 类
+- [ ] `wa1kpcap/core/packet.py` — Python Info class (`_SlottedInfoBase` with `__slots__` direct attrs) + ParsedPacket integration / Python Info 类（`_SlottedInfoBase` + `__slots__` 直接属性）
 - [ ] `wa1kpcap/core/__init__.py` — Export / 导出
 - [ ] `wa1kpcap/native/converter.py` — Dict-path handler + `_KNOWN_KEYS` / 字典路径处理
 - [ ] Parent protocol YAML `next_protocol` mapping / 父协议 YAML 映射

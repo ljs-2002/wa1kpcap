@@ -425,7 +425,7 @@ class Wa1kPcap:
 
     def _aggregate_flow_info(self, flow: Flow) -> None:
         """Aggregate packet-level protocol info to flow-level using generic merge."""
-        from wa1kpcap.core.packet import ProtocolInfo, TLSInfo
+        from wa1kpcap.core.packet import ProtocolInfo, _ProtocolInfoBase, TLSInfo
         from wa1kpcap.protocols.application import TLSFlowState
 
         # 1. Extract TLS info from flow._tls_state (dpkt reassembly path)
@@ -435,7 +435,7 @@ class Wa1kPcap:
         # 2. Generic merge: iterate all packets, merge each layer via ProtocolInfo.merge()
         for pkt in flow.packets:
             for layer_name, layer_info in pkt.layers.items():
-                if not isinstance(layer_info, ProtocolInfo):
+                if not isinstance(layer_info, _ProtocolInfoBase):
                     continue
                 existing = flow.layers.get(layer_name)
                 if existing is None:
