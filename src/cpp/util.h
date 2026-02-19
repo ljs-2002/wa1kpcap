@@ -69,4 +69,16 @@ inline std::string format_mac(const uint8_t* p) {
     return buf;
 }
 
+inline std::string format_hex(const uint8_t* p, size_t len) {
+    std::string result;
+    result.reserve(len * 3);
+    char buf[4];
+    for (size_t i = 0; i < len; ++i) {
+        if (i > 0) result += ':';
+        snprintf(buf, sizeof(buf), "%02x", p[i]);
+        result += buf;
+    }
+    return result;
+}
+
 } // namespace util

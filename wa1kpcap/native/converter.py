@@ -11,6 +11,7 @@ from wa1kpcap.core.packet import (
     ParsedPacket, EthernetInfo, IPInfo, IP6Info,
     TCPInfo, UDPInfo, DNSInfo, TLSInfo,
     ARPInfo, ICMPInfo, ICMP6Info,
+    VLANInfo, SLLInfo, SLL2Info,
     ProtocolInfo, ProtocolRegistry,
 )
 
@@ -164,6 +165,37 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             checksum=icmpv6.get("checksum", 0),
         )
 
+    # ── VLAN ──
+    vlan = d.get("vlan")
+    if vlan and isinstance(vlan, dict):
+        pkt.vlan = VLANInfo(
+            vlan_id=vlan.get("vlan_id", 0),
+            priority=vlan.get("priority", 0),
+            dei=vlan.get("dei", 0),
+            ether_type=vlan.get("ether_type", 0),
+        )
+
+    # ── Linux SLL ──
+    sll = d.get("linux_sll")
+    if sll and isinstance(sll, dict):
+        pkt.sll = SLLInfo(
+            packet_type=sll.get("packet_type", 0),
+            arphrd_type=sll.get("arphrd_type", 0),
+            addr=sll.get("addr", ""),
+            protocol=sll.get("protocol", 0),
+        )
+
+    # ── Linux SLL2 ──
+    sll2 = d.get("linux_sll2")
+    if sll2 and isinstance(sll2, dict):
+        pkt.sll2 = SLL2Info(
+            protocol_type=sll2.get("protocol_type", 0),
+            interface_index=sll2.get("interface_index", 0),
+            arphrd_type=sll2.get("arphrd_type", 0),
+            packet_type=sll2.get("packet_type", 0),
+            addr=sll2.get("addr", ""),
+        )
+
     # ── TLS ──
     tls_record = d.get("tls_record")
     if tls_record and isinstance(tls_record, dict):
@@ -202,6 +234,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
     _KNOWN_KEYS = {
         'ethernet', 'ipv4', 'ipv6', 'tcp', 'udp', 'dns',
         'arp', 'icmp', 'icmpv6',
+        'vlan', 'linux_sll', 'linux_sll2',
         'tls_record', 'tls_handshake', 'tls_client_hello',
         'tls_server_hello', 'tls_certificate', 'tls_stream',
         '_raw_tcp_payload', '_raw_data', '_link_type', 'app_len',

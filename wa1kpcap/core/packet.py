@@ -96,6 +96,8 @@ class ProtocolRegistry:
 
     def __init__(self):
         self._registry: dict[str, type[ProtocolInfo]] = {}
+        self._yaml_paths: dict[str, str] = {}
+        self._routing: dict[str, dict[str, dict[int, str]]] = {}
 
     @classmethod
     def get_instance(cls) -> 'ProtocolRegistry':
@@ -103,11 +105,23 @@ class ProtocolRegistry:
             cls._instance = cls()
         return cls._instance
 
-    def register(self, name: str, info_class: type[ProtocolInfo]):
+    def register(self, name: str, info_class: type[ProtocolInfo],
+                 yaml_path: str | None = None,
+                 routing: dict[str, dict[int, str]] | None = None):
         self._registry[name] = info_class
+        if yaml_path is not None:
+            self._yaml_paths[name] = yaml_path
+        if routing is not None:
+            self._routing[name] = routing
 
     def get(self, name: str) -> type[ProtocolInfo] | None:
         return self._registry.get(name)
+
+    def get_yaml_paths(self) -> dict[str, str]:
+        return dict(self._yaml_paths)
+
+    def get_routing(self) -> dict[str, dict[str, dict[int, str]]]:
+        return dict(self._routing)
 
     def create(self, name: str, fields: dict) -> ProtocolInfo | None:
         cls = self._registry.get(name)
@@ -648,12 +662,82 @@ class DNSInfo(_SlottedInfoBase):
                 setattr(self, k, v)
 
 
+class VLANInfo(_SlottedInfoBase):
+    """802.1Q VLAN tag information."""
+    __slots__ = ('vlan_id', 'priority', 'dei', 'ether_type', '_raw')
+    _SLOT_NAMES = ('vlan_id', 'priority', 'dei', 'ether_type', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, 0, b'')
+
+    def __init__(self, vlan_id=0, priority=0, dei=0, ether_type=0,
+                 _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.vlan_id = fields.get('vlan_id', 0)
+            self.priority = fields.get('priority', 0)
+            self.dei = fields.get('dei', 0)
+            self.ether_type = fields.get('ether_type', 0)
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.vlan_id = vlan_id
+            self.priority = priority
+            self.dei = dei
+            self.ether_type = ether_type
+            self._raw = _raw
+
+
+class SLLInfo(_SlottedInfoBase):
+    """Linux cooked capture (SLL) information."""
+    __slots__ = ('packet_type', 'arphrd_type', 'addr', 'protocol', '_raw')
+    _SLOT_NAMES = ('packet_type', 'arphrd_type', 'addr', 'protocol', '_raw')
+    _SLOT_DEFAULTS = (0, 0, '', 0, b'')
+
+    def __init__(self, packet_type=0, arphrd_type=0, addr="", protocol=0,
+                 _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.packet_type = fields.get('packet_type', 0)
+            self.arphrd_type = fields.get('arphrd_type', 0)
+            self.addr = fields.get('addr', "")
+            self.protocol = fields.get('protocol', 0)
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.packet_type = packet_type
+            self.arphrd_type = arphrd_type
+            self.addr = addr
+            self.protocol = protocol
+            self._raw = _raw
+
+
+class SLL2Info(_SlottedInfoBase):
+    """Linux cooked capture v2 (SLL2) information."""
+    __slots__ = ('protocol_type', 'interface_index', 'arphrd_type', 'packet_type', 'addr', '_raw')
+    _SLOT_NAMES = ('protocol_type', 'interface_index', 'arphrd_type', 'packet_type', 'addr', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, 0, '', b'')
+
+    def __init__(self, protocol_type=0, interface_index=0, arphrd_type=0,
+                 packet_type=0, addr="", _raw=b"",
+                 fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.protocol_type = fields.get('protocol_type', 0)
+            self.interface_index = fields.get('interface_index', 0)
+            self.arphrd_type = fields.get('arphrd_type', 0)
+            self.packet_type = fields.get('packet_type', 0)
+            self.addr = fields.get('addr', "")
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.protocol_type = protocol_type
+            self.interface_index = interface_index
+            self.arphrd_type = arphrd_type
+            self.packet_type = packet_type
+            self.addr = addr
+            self._raw = _raw
+
+
 # Map from short property names to layer registry names
 _PROTO_KEY_TO_LAYER = {
     'eth': 'ethernet', 'ip': 'ipv4', 'ip6': 'ipv6',
     'tcp': 'tcp', 'udp': 'udp', 'icmp': 'icmp',
     'tls': 'tls_record', 'http': 'http', 'dns': 'dns',
     'arp': 'arp', 'icmp6': 'icmpv6',
+    'vlan': 'vlan', 'sll': 'linux_sll', 'sll2': 'linux_sll2',
 }
 
 
@@ -680,7 +764,8 @@ class ParsedPacket:
                  is_client_to_server=True, packet_index=-1, flow_index=-1,
                  _raw_eth=None, _raw_ip=None, _raw_transport=None, _raw_app=None,
                  _raw_tcp_payload=b"", _flow_key_cache=None, extra_layers=None,
-                 arp=None, icmp6=None):
+                 arp=None, icmp6=None,
+                 vlan=None, sll=None, sll2=None):
         self.timestamp = timestamp
         self.raw_data = raw_data
         self.link_layer_type = link_layer_type
@@ -704,7 +789,8 @@ class ParsedPacket:
         for key, val in (('eth', eth), ('ip', ip), ('ip6', ip6),
                          ('tcp', tcp), ('udp', udp), ('icmp', icmp),
                          ('tls', tls), ('http', http), ('dns', dns),
-                         ('arp', arp), ('icmp6', icmp6)):
+                         ('arp', arp), ('icmp6', icmp6),
+                         ('vlan', vlan), ('sll', sll), ('sll2', sll2)):
             if val is not None:
                 self.layers[_PROTO_KEY_TO_LAYER[key]] = val
 
@@ -808,6 +894,30 @@ class ParsedPacket:
         if v is not None: self.layers['icmpv6'] = v
         else: self.layers.pop('icmpv6', None)
 
+    @property
+    def vlan(self) -> VLANInfo | None:
+        return self.layers.get('vlan')
+    @vlan.setter
+    def vlan(self, v):
+        if v is not None: self.layers['vlan'] = v
+        else: self.layers.pop('vlan', None)
+
+    @property
+    def sll(self) -> SLLInfo | None:
+        return self.layers.get('linux_sll')
+    @sll.setter
+    def sll(self, v):
+        if v is not None: self.layers['linux_sll'] = v
+        else: self.layers.pop('linux_sll', None)
+
+    @property
+    def sll2(self) -> SLL2Info | None:
+        return self.layers.get('linux_sll2')
+    @sll2.setter
+    def sll2(self, v):
+        if v is not None: self.layers['linux_sll2'] = v
+        else: self.layers.pop('linux_sll2', None)
+
     def get_layer(self, name: str) -> ProtocolInfo | None:
         """Get a protocol layer by registry name."""
         return self.layers.get(name)
@@ -898,3 +1008,6 @@ _registry.register('icmp', ICMPInfo)
 _registry.register('tls_record', TLSInfo)
 _registry.register('dns', DNSInfo)
 _registry.register('http', HTTPInfo)
+_registry.register('vlan', VLANInfo)
+_registry.register('linux_sll', SLLInfo)
+_registry.register('linux_sll2', SLL2Info)

@@ -1,0 +1,37 @@
+name: linux_sll2
+fields:
+  - name: protocol_type
+    type: fixed
+    size: 2
+    format: uint
+  - name: reserved
+    type: fixed
+    size: 2
+    format: uint
+  - name: interface_index
+    type: fixed
+    size: 4
+    format: uint
+  - name: arphrd_type
+    type: fixed
+    size: 2
+    format: uint
+  - name: packet_type
+    type: fixed
+    size: 1
+    format: uint
+  - name: addr_len
+    type: fixed
+    size: 1
+    format: uint
+  - name: addr
+    type: fixed
+    size: 8
+    format: bytes
+
+next_protocol:
+  field: protocol_type
+  mapping:
+    0x0800: ipv4
+    0x86DD: ipv6
+    0x0806: arp

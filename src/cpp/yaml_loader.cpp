@@ -245,3 +245,15 @@ const ProtocolDefinition* YamlLoader::get_protocol(const std::string& name) cons
     auto it = protocols_.find(name);
     return (it != protocols_.end()) ? &it->second : nullptr;
 }
+
+void YamlLoader::add_next_protocol_mapping(const std::string& proto_name, int value, const std::string& target) {
+    auto it = protocols_.find(proto_name);
+    if (it == protocols_.end()) {
+        throw std::runtime_error("Protocol not found: " + proto_name);
+    }
+    if (!it->second.next_protocol) {
+        NextProtocol np;
+        it->second.next_protocol = std::move(np);
+    }
+    it->second.next_protocol->mapping[value] = target;
+}

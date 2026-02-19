@@ -129,6 +129,28 @@ struct NativeICMP6Info {
     std::string rest_data;  // raw bytes after 4-byte header
 };
 
+struct NativeVLANInfo {
+    int64_t vlan_id = 0;
+    int64_t priority = 0;
+    int64_t dei = 0;
+    int64_t ether_type = 0;
+};
+
+struct NativeSLLInfo {
+    int64_t packet_type = 0;
+    int64_t arphrd_type = 0;
+    std::string addr;           // 8-byte link-layer address as hex string
+    int64_t protocol = 0;
+};
+
+struct NativeSLL2Info {
+    int64_t protocol_type = 0;
+    int64_t interface_index = 0;
+    int64_t arphrd_type = 0;
+    int64_t packet_type = 0;
+    std::string addr;           // 8-byte link-layer address as hex string
+};
+
 struct NativeParsedPacket {
     double timestamp = 0.0;
     std::string raw_data;         // stored as py::bytes

@@ -102,7 +102,144 @@ py::dict fieldmap_to_pydict(const FieldMap& fm) {
 // ── ProtocolEngine ──
 
 ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
-    : loader_(loader) {}
+    : loader_(loader)
+{
+    // ── Populate fast-path dispatch table ──
+    fast_dispatch_["ethernet"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_ethernet(buf, len, pkt);
+    };
+    fast_dispatch_["ipv4"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        auto fr = fast_parse_ipv4(buf, len, pkt);
+        if (fr.bytes_consumed > 0) fr.bounds_remaining = true;
+        return fr;
+    };
+    fast_dispatch_["ipv6"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        auto fr = fast_parse_ipv6(buf, len, pkt);
+        if (fr.bytes_consumed > 0) fr.bounds_remaining = true;
+        return fr;
+    };
+    fast_dispatch_["tcp"] = [this](const uint8_t* buf, size_t len, size_t remaining, NativeParsedPacket& pkt) {
+        return fast_parse_tcp(buf, len, remaining, pkt);
+    };
+    fast_dispatch_["udp"] = [this](const uint8_t* buf, size_t len, size_t remaining, NativeParsedPacket& pkt) {
+        return fast_parse_udp(buf, len, remaining, pkt);
+    };
+    fast_dispatch_["arp"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_arp(buf, len, pkt);
+    };
+    fast_dispatch_["icmp"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_icmp(buf, len, pkt);
+    };
+    fast_dispatch_["icmpv6"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_icmpv6(buf, len, pkt);
+    };
+
+    // ── Transparent fast-path: dispatch-only, no struct ──
+
+    // raw_ip: peek version nibble → ipv4 or ipv6
+    fast_dispatch_["raw_ip"] = [](const uint8_t* buf, size_t len, size_t, NativeParsedPacket&) -> FastResult {
+        if (len < 1) return {};
+        uint8_t version = (buf[0] >> 4) & 0x0F;
+        if (version == 4) return {0, "ipv4"};
+        if (version == 6) return {0, "ipv6"};
+        return {};
+    };
+
+    // bsd_loopback: 4-byte AF field (host byte order) → ipv4 or ipv6
+    fast_dispatch_["bsd_loopback"] = [](const uint8_t* buf, size_t len, size_t, NativeParsedPacket&) -> FastResult {
+        if (len < 4) return {};
+        uint32_t af = hardcoded::parse_bsd_loopback_af(buf, len);
+        if (af == 0x0800) return {4, "ipv4"};
+        if (af == 0x86DD) return {4, "ipv6"};
+        return {4, ""};  // unknown AF, consume header but stop
+    };
+
+    // nflog: walk TLV to find NFULA_PAYLOAD, then peek version nibble
+    fast_dispatch_["nflog"] = [](const uint8_t* buf, size_t len, size_t, NativeParsedPacket&) -> FastResult {
+        auto result = hardcoded::parse_nflog_payload(buf, len);
+        if (!result.found || result.length < 1) return {};
+        uint8_t version = (buf[result.offset] >> 4) & 0x0F;
+        if (version == 4) return {result.offset, "ipv4"};
+        if (version == 6) return {result.offset, "ipv6"};
+        return {};
+    };
+
+    // ── Full built-in fast-path: struct + dispatch ──
+
+    fast_dispatch_["vlan"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_vlan(buf, len, pkt);
+    };
+    fast_dispatch_["linux_sll"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_sll(buf, len, pkt);
+    };
+    fast_dispatch_["linux_sll2"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_sll2(buf, len, pkt);
+    };
+
+    // ── Populate slow-path fill dispatch table ──
+    fill_dispatch_["ethernet"] = [this](SlowFillContext& ctx) {
+        fill_ethernet(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["ipv4"] = [this](SlowFillContext& ctx) {
+        fill_ipv4(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["ipv6"] = [this](SlowFillContext& ctx) {
+        fill_ipv6(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["tcp"] = [this](SlowFillContext& ctx) {
+        int64_t app_len_val = 0;
+        if (ctx.bytes_consumed < ctx.remaining) {
+            app_len_val = static_cast<int64_t>(ctx.remaining - ctx.bytes_consumed);
+        }
+        fill_tcp(ctx.pkt, ctx.fields, app_len_val);
+        if (app_len_val > 0) {
+            const uint8_t* payload = ctx.cur + ctx.bytes_consumed;
+            ctx.pkt._raw_tcp_payload.assign(
+                reinterpret_cast<const char*>(payload), static_cast<size_t>(app_len_val));
+        }
+    };
+    fill_dispatch_["udp"] = [this](SlowFillContext& ctx) {
+        int64_t app_len_val = 0;
+        if (ctx.bytes_consumed < ctx.remaining) {
+            app_len_val = static_cast<int64_t>(ctx.remaining - ctx.bytes_consumed);
+        }
+        fill_udp(ctx.pkt, ctx.fields, app_len_val);
+    };
+    fill_dispatch_["dns"] = [this](SlowFillContext& ctx) {
+        fill_dns(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["arp"] = [this](SlowFillContext& ctx) {
+        fill_arp(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["icmp"] = [this](SlowFillContext& ctx) {
+        fill_icmp(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["icmpv6"] = [this](SlowFillContext& ctx) {
+        fill_icmpv6(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["vlan"] = [this](SlowFillContext& ctx) {
+        fill_vlan(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["linux_sll"] = [this](SlowFillContext& ctx) {
+        fill_sll(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["linux_sll2"] = [this](SlowFillContext& ctx) {
+        fill_sll2(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["tls_stream"] = [](SlowFillContext& ctx) {
+        extract_tls_from_repeat_fields(ctx.fields, ctx.pkt);
+    };
+    // TLS sub-layers: store into tls_layers for deferred fill_tls
+    auto tls_layer_fn = [](SlowFillContext& ctx) {
+        ctx.has_tls = true;
+        ctx.tls_layers[ctx.proto_name] = std::move(ctx.fields);
+    };
+    fill_dispatch_["tls_record"] = tls_layer_fn;
+    fill_dispatch_["tls_handshake"] = tls_layer_fn;
+    fill_dispatch_["tls_client_hello"] = tls_layer_fn;
+    fill_dispatch_["tls_server_hello"] = tls_layer_fn;
+    fill_dispatch_["tls_certificate"] = tls_layer_fn;
+}
 
 ProtocolEngine::ParseResult ProtocolEngine::parse_layer(
     const std::string& protocol_name,
@@ -884,6 +1021,14 @@ NativeParsedPacket NativeParser::parse_packet_struct(py::bytes buf, uint32_t lin
         link_type, save_raw_bytes);
 }
 
+void NativeParser::load_extra_file(const std::string& file_path) {
+    loader_.load_file(file_path);
+}
+
+void NativeParser::add_protocol_routing(const std::string& parent_proto, int value, const std::string& target_proto) {
+    loader_.add_next_protocol_mapping(parent_proto, value, target_proto);
+}
+
 // ── Fill helpers: FieldMap → NativeParsedPacket struct fields ──
 // All helpers write directly into embedded structs (no heap allocs).
 // Single-pass iteration over FieldMap instead of multiple find() calls.
@@ -1167,6 +1312,18 @@ void ProtocolEngine::merge_tls(NativeParsedPacket& pkt, const NativeTLSInfo& src
 // Fast-path parsers: buf → struct directly, no FieldMap
 // ═══════════════════════════════════════════════════════════
 
+std::string ProtocolEngine::yaml_next_protocol_lookup(
+    const std::string& proto_name, int value) const {
+    auto* proto_def = loader_.get_protocol(proto_name);
+    if (proto_def && proto_def->next_protocol) {
+        auto mit = proto_def->next_protocol->mapping.find(value);
+        if (mit != proto_def->next_protocol->mapping.end()) {
+            return mit->second;
+        }
+    }
+    return {};
+}
+
 ProtocolEngine::FastResult ProtocolEngine::fast_parse_ethernet(
     const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
 {
@@ -1184,6 +1341,7 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ethernet(
     case 0x0806: next = "arp"; break;
     case 0x8100: next = "vlan"; break;
     }
+    if (next.empty()) next = yaml_next_protocol_lookup("ethernet", ether_type);
     return {14, std::move(next)};
 }
 
@@ -1236,6 +1394,7 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ipv4(
     case 1:  next = "icmp"; break;
     case 58: next = "icmpv6"; break;
     }
+    if (next.empty()) next = yaml_next_protocol_lookup("ipv4", ip.proto);
     return {bytes_consumed, std::move(next)};
 }
 
@@ -1309,6 +1468,7 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ipv6(
     case 1:  next = "icmp"; break;
     case 58: next = "icmpv6"; break;
     }
+    if (next.empty()) next = yaml_next_protocol_lookup("ipv6", next_header);
     return {offset, std::move(next)};
 }
 
@@ -1369,6 +1529,8 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_tcp(
             next = "tls_stream";
         }
     }
+    if (next.empty()) next = yaml_next_protocol_lookup("tcp", tcp.dport);
+    if (next.empty()) next = yaml_next_protocol_lookup("tcp", tcp.sport);
     return {header_length, std::move(next)};
 }
 
@@ -1391,19 +1553,18 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_udp(
     }
     pkt.app_len = app_len;
 
-    // Consult YAML next_protocol mapping (covers dns + custom protocols)
+    // Hardcoded well-known ports + YAML fallback for custom protocols
     std::string next;
-    auto* proto_def = loader_.get_protocol("udp");
-    if (proto_def && proto_def->next_protocol) {
-        auto& np = *proto_def->next_protocol;
-        for (int64_t port : {udp.dport, udp.sport}) {
-            auto mit = np.mapping.find(static_cast<int>(port));
-            if (mit != np.mapping.end()) {
-                next = mit->second;
-                break;
-            }
+    switch (udp.dport) {
+        case 53: next = "dns"; break;
+    }
+    if (next.empty()) {
+        switch (udp.sport) {
+            case 53: next = "dns"; break;
         }
     }
+    if (next.empty()) next = yaml_next_protocol_lookup("udp", udp.dport);
+    if (next.empty()) next = yaml_next_protocol_lookup("udp", udp.sport);
     return {8, std::move(next)};
 }
 
@@ -1461,6 +1622,139 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_icmpv6(
     return {len, ""};  // ICMPv6 is a leaf protocol
 }
 
+// ── VLAN (802.1Q): 4 bytes ──
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_vlan(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 4) return {};
+    pkt.has_vlan = true;
+    auto& v = pkt.vlan;
+
+    uint16_t tci = util::read_u16_be(buf);
+    v.priority   = (tci >> 13) & 0x07;
+    v.dei        = (tci >> 12) & 0x01;
+    v.vlan_id    = tci & 0x0FFF;
+    v.ether_type = util::read_u16_be(buf + 2);
+
+    // next_protocol from ether_type
+    std::string next;
+    switch (v.ether_type) {
+        case 0x0800: next = "ipv4"; break;
+        case 0x86DD: next = "ipv6"; break;
+        case 0x0806: next = "arp";  break;
+        case 0x8100: next = "vlan"; break;  // Q-in-Q
+    }
+    if (next.empty()) next = yaml_next_protocol_lookup("vlan", v.ether_type);
+    return {4, std::move(next)};
+}
+
+// ── Linux SLL (cooked capture v1): 16 bytes ──
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_sll(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 16) return {};
+    pkt.has_sll = true;
+    auto& s = pkt.sll;
+
+    s.packet_type = util::read_u16_be(buf);
+    s.arphrd_type = util::read_u16_be(buf + 2);
+    uint16_t addr_len = util::read_u16_be(buf + 4);
+    if (addr_len > 8) addr_len = 8;
+    s.addr = util::format_hex(buf + 6, addr_len);
+    s.protocol = util::read_u16_be(buf + 14);
+
+    std::string next;
+    switch (s.protocol) {
+        case 0x0800: next = "ipv4"; break;
+        case 0x86DD: next = "ipv6"; break;
+        case 0x0806: next = "arp";  break;
+    }
+    if (next.empty()) next = yaml_next_protocol_lookup("linux_sll", s.protocol);
+    return {16, std::move(next)};
+}
+
+// ── Linux SLL2 (cooked capture v2): 20 bytes ──
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_sll2(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 20) return {};
+    pkt.has_sll2 = true;
+    auto& s = pkt.sll2;
+
+    s.protocol_type   = util::read_u16_be(buf);
+    s.interface_index  = util::read_u32_be(buf + 4);
+    s.arphrd_type     = util::read_u16_be(buf + 8);
+    s.packet_type     = buf[10];
+    uint8_t addr_len  = buf[11];
+    if (addr_len > 8) addr_len = 8;
+    s.addr = util::format_hex(buf + 12, addr_len);
+
+    std::string next;
+    switch (s.protocol_type) {
+        case 0x0800: next = "ipv4"; break;
+        case 0x86DD: next = "ipv6"; break;
+        case 0x0806: next = "arp";  break;
+    }
+    if (next.empty()) next = yaml_next_protocol_lookup("linux_sll2", s.protocol_type);
+    return {20, std::move(next)};
+}
+
+// ── fill_vlan: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_vlan(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_vlan = true;
+    auto& v = pkt.vlan;
+    for (auto& [k, val] : fm) {
+        if (k == "vlan_id")    v.vlan_id    = field_to_int(val);
+        else if (k == "priority") v.priority = field_to_int(val);
+        else if (k == "dei")      v.dei      = field_to_int(val);
+        else if (k == "ether_type") v.ether_type = field_to_int(val);
+    }
+}
+
+// ── fill_sll: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_sll(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_sll = true;
+    auto& s = pkt.sll;
+    for (auto& [k, val] : fm) {
+        if (k == "packet_type")    s.packet_type = field_to_int(val);
+        else if (k == "arphrd_type") s.arphrd_type = field_to_int(val);
+        else if (k == "protocol")    s.protocol    = field_to_int(val);
+        else if (k == "addr") {
+            // addr from YAML is bytes; convert to hex string
+            if (auto* bv = std::get_if<std::vector<uint8_t>>(&val)) {
+                s.addr = util::format_hex(bv->data(), bv->size());
+            } else if (auto* sv = std::get_if<std::string>(&val)) {
+                s.addr = *sv;
+            }
+        }
+    }
+}
+
+// ── fill_sll2: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_sll2(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_sll2 = true;
+    auto& s = pkt.sll2;
+    for (auto& [k, val] : fm) {
+        if (k == "protocol_type")      s.protocol_type   = field_to_int(val);
+        else if (k == "interface_index") s.interface_index = field_to_int(val);
+        else if (k == "arphrd_type")     s.arphrd_type    = field_to_int(val);
+        else if (k == "packet_type")     s.packet_type    = field_to_int(val);
+        else if (k == "addr") {
+            if (auto* bv = std::get_if<std::vector<uint8_t>>(&val)) {
+                s.addr = util::format_hex(bv->data(), bv->size());
+            } else if (auto* sv = std::get_if<std::string>(&val)) {
+                s.addr = *sv;
+            }
+        }
+    }
+}
+
 // ── parse_packet_struct: parse full packet into C++ struct ──
 // ── parse_packet_struct: structured output path ──
 
@@ -1487,55 +1781,24 @@ NativeParsedPacket ProtocolEngine::parse_packet_struct(
     int64_t app_len_val = 0;
 
     while (!current_proto.empty() && remaining > 0 && max_layers-- > 0) {
-        // Fast path for known protocols: parse directly into struct
+        // Fast path: table-driven dispatch into struct
         bool used_fast_path = false;
-        FastResult fr;
-
-        if (current_proto == "ethernet") {
-            fr = fast_parse_ethernet(cur, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        } else if (current_proto == "ipv4") {
-            fr = fast_parse_ipv4(cur, remaining, pkt);
-            if (fr.bytes_consumed > 0) {
+        auto fast_it = fast_dispatch_.find(current_proto);
+        if (fast_it != fast_dispatch_.end()) {
+            auto fr = fast_it->second(cur, remaining, remaining, pkt);
+            if (fr.bytes_consumed > 0 || !fr.next_protocol.empty()) {
                 used_fast_path = true;
-                // Bound remaining by total_length (like generic path)
-                if (static_cast<size_t>(pkt.ip_len) < remaining) {
+                if (fr.bounds_remaining && static_cast<size_t>(pkt.ip_len) < remaining) {
                     remaining = static_cast<size_t>(pkt.ip_len);
                 }
-            }
-        } else if (current_proto == "ipv6") {
-            fr = fast_parse_ipv6(cur, remaining, pkt);
-            if (fr.bytes_consumed > 0) {
-                used_fast_path = true;
-                if (static_cast<size_t>(pkt.ip_len) < remaining) {
-                    remaining = static_cast<size_t>(pkt.ip_len);
+                if (g_profiling_enabled) {
+                    g_prof.total_layers.fetch_add(1, std::memory_order_relaxed);
                 }
+                cur += fr.bytes_consumed;
+                remaining -= fr.bytes_consumed;
+                current_proto = std::move(fr.next_protocol);
+                continue;
             }
-        } else if (current_proto == "tcp") {
-            fr = fast_parse_tcp(cur, remaining, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        } else if (current_proto == "udp") {
-            fr = fast_parse_udp(cur, remaining, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        } else if (current_proto == "arp") {
-            fr = fast_parse_arp(cur, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        } else if (current_proto == "icmp") {
-            fr = fast_parse_icmp(cur, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        } else if (current_proto == "icmpv6") {
-            fr = fast_parse_icmpv6(cur, remaining, pkt);
-            used_fast_path = (fr.bytes_consumed > 0);
-        }
-
-        if (used_fast_path) {
-            if (g_profiling_enabled) {
-                g_prof.total_layers.fetch_add(1, std::memory_order_relaxed);
-            }
-            cur += fr.bytes_consumed;
-            remaining -= fr.bytes_consumed;
-            current_proto = std::move(fr.next_protocol);
-            continue;
         }
 
         // Slow path: generic YAML-driven parse_layer + fill_struct
@@ -1562,49 +1825,14 @@ NativeParsedPacket ProtocolEngine::parse_packet_struct(
             }
         }
 
-        // Fill struct for known protocols — no FieldMap copy needed
+        // Fill struct: table-driven dispatch
         auto fill_start = std::chrono::high_resolution_clock::now();
 
-        if (current_proto == "ethernet") {
-            fill_ethernet(pkt, pr.fields);
-        } else if (current_proto == "ipv4") {
-            fill_ipv4(pkt, pr.fields);
-        } else if (current_proto == "ipv6") {
-            fill_ipv6(pkt, pr.fields);
-        } else if (current_proto == "tcp") {
-            if (pr.bytes_consumed < remaining) {
-                app_len_val = static_cast<int64_t>(remaining - pr.bytes_consumed);
-            }
-            fill_tcp(pkt, pr.fields, app_len_val);
-
-            // Store raw TCP payload
-            if (app_len_val > 0) {
-                const uint8_t* payload = cur + pr.bytes_consumed;
-                size_t payload_len = static_cast<size_t>(app_len_val);
-                pkt._raw_tcp_payload.assign(
-                    reinterpret_cast<const char*>(payload), payload_len);
-            }
-        } else if (current_proto == "udp") {
-            if (pr.bytes_consumed < remaining) {
-                app_len_val = static_cast<int64_t>(remaining - pr.bytes_consumed);
-            }
-            fill_udp(pkt, pr.fields, app_len_val);
-        } else if (current_proto == "dns") {
-            fill_dns(pkt, pr.fields);
-        } else if (current_proto == "arp") {
-            fill_arp(pkt, pr.fields);
-        } else if (current_proto == "icmp") {
-            fill_icmp(pkt, pr.fields);
-        } else if (current_proto == "icmpv6") {
-            fill_icmpv6(pkt, pr.fields);
-        } else if (current_proto == "tls_stream") {
-            extract_tls_from_repeat_fields(pr.fields, pkt);
-        } else if (current_proto == "tls_record" || current_proto == "tls_handshake" ||
-                   current_proto == "tls_client_hello" || current_proto == "tls_server_hello" ||
-                   current_proto == "tls_certificate") {
-            has_tls = true;
-            // Only TLS layers get stored — move to avoid copy
-            tls_layers[current_proto] = std::move(pr.fields);
+        auto fill_it = fill_dispatch_.find(current_proto);
+        if (fill_it != fill_dispatch_.end()) {
+            SlowFillContext ctx{pkt, pr.fields, cur, pr.bytes_consumed, remaining,
+                                has_tls, tls_layers, current_proto};
+            fill_it->second(ctx);
         } else {
             // Unknown protocol — store in extra_layers for Python-side handling
             pkt.extra_layers[current_proto] = std::move(pr.fields);

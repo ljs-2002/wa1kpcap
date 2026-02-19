@@ -186,6 +186,28 @@ static py::object build_dataclass_from_struct(
         icmp6 = cc.ICMP6Info_cls(pkt.icmp6.type, pkt.icmp6.code, pkt.icmp6.checksum, rest);
     }
 
+    py::object vlan = cc.none;
+    if (pkt.has_vlan) {
+        vlan = cc.VLANInfo_cls(
+            pkt.vlan.vlan_id, pkt.vlan.priority, pkt.vlan.dei,
+            pkt.vlan.ether_type, cc.empty_bytes);
+    }
+
+    py::object sll = cc.none;
+    if (pkt.has_sll) {
+        sll = cc.SLLInfo_cls(
+            pkt.sll.packet_type, pkt.sll.arphrd_type,
+            pkt.sll.addr, pkt.sll.protocol, cc.empty_bytes);
+    }
+
+    py::object sll2 = cc.none;
+    if (pkt.has_sll2) {
+        sll2 = cc.SLL2Info_cls(
+            pkt.sll2.protocol_type, pkt.sll2.interface_index,
+            pkt.sll2.arphrd_type, pkt.sll2.packet_type,
+            pkt.sll2.addr, cc.empty_bytes);
+    }
+
     py::object raw_payload = pkt._raw_tcp_payload.empty()
         ? cc.empty_bytes : py::bytes(pkt._raw_tcp_payload);
 
@@ -213,13 +235,15 @@ static py::object build_dataclass_from_struct(
         if (pkt.has_tcp) { src_port = pkt.tcp.sport; dst_port = pkt.tcp.dport; }
         else if (pkt.has_udp) { src_port = pkt.udp.sport; dst_port = pkt.udp.dport; }
 
+        int64_t vlan_id = pkt.has_vlan ? pkt.vlan.vlan_id : 0;
+
         py::tuple canonical;
         if (std::make_tuple(src_ip, src_port) <= std::make_tuple(dst_ip, dst_port)) {
-            canonical = py::make_tuple(src_ip, src_port, dst_ip, dst_port, protocol);
+            canonical = py::make_tuple(src_ip, src_port, dst_ip, dst_port, protocol, vlan_id);
         } else {
-            canonical = py::make_tuple(dst_ip, dst_port, src_ip, src_port, protocol);
+            canonical = py::make_tuple(dst_ip, dst_port, src_ip, src_port, protocol, vlan_id);
         }
-        flow_key_cache = py::make_tuple(canonical, src_ip, dst_ip, src_port, dst_port, protocol);
+        flow_key_cache = py::make_tuple(canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id);
     }
 
     return cc.ParsedPacket_cls(
@@ -229,7 +253,8 @@ static py::object build_dataclass_from_struct(
         cc.true_, cc.neg1, cc.neg1,
         cc.none, cc.none, cc.none, cc.none,
         raw_payload, flow_key_cache, extra_layers_py,
-        arp, icmp6);
+        arp, icmp6,
+        vlan, sll, sll2);
 }
 
 // Standalone function for compute_array_stats (MSVC compatibility)
@@ -769,6 +794,10 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
              py::arg("buf"), py::arg("link_type"), py::arg("save_raw_bytes") = false)
         .def("parse_tls_record", &NativeParser::parse_tls_record,
              py::arg("buf"))
+        .def("load_extra_file", &NativeParser::load_extra_file,
+             py::arg("file_path"))
+        .def("add_protocol_routing", &NativeParser::add_protocol_routing,
+             py::arg("parent_proto"), py::arg("value"), py::arg("target_proto"))
         .def("parse_to_dataclass", [](NativeParser& self, py::bytes buf,
                                        uint32_t link_type, bool save_raw_bytes,
                                        double timestamp, int caplen, int wirelen) -> py::object {

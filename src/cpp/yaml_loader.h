@@ -129,6 +129,9 @@ public:
 
     const ProtocolDefinition* get_protocol(const std::string& name) const;
 
+    // Inject a next_protocol mapping entry into an existing protocol
+    void add_next_protocol_mapping(const std::string& proto_name, int value, const std::string& target);
+
 private:
     std::map<std::string, ProtocolDefinition> protocols_;
     LinkTypeConfig link_types_;
