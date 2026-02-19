@@ -282,6 +282,40 @@ ProtocolRegistry.get_instance().register(
 )
 ```
 
+### Step 6: Flow Aggregation (merge) / 流聚合（merge）
+
+When multiple packets in a flow contain your protocol, their info objects are merged via `merge(self, other)`. The default `ProtocolInfo.merge()` uses first-wins logic: if a field is `None`, it copies from `other`.
+
+当流中多个包包含你的协议时，通过 `merge(self, other)` 合并信息对象。默认的 `ProtocolInfo.merge()` 使用 first-wins 逻辑：字段为 `None` 时从 `other` 复制。
+
+Override `merge()` if your protocol needs special aggregation:
+
+如果协议需要特殊聚合逻辑，覆写 `merge()`：
+
+```python
+class MyProtocolInfo(ProtocolInfo):
+    __slots__ = ()
+
+    def merge(self, other: "MyProtocolInfo") -> None:
+        for key, val in other._fields.items():
+            cur = self._fields.get(key)
+            if cur is None:
+                self._fields[key] = val
+            elif isinstance(cur, list) and isinstance(val, list):
+                # Append unique items / 追加不重复元素
+                seen = set(id(x) for x in cur)
+                cur.extend(x for x in val if id(x) not in seen)
+            elif isinstance(cur, dict) and isinstance(val, dict):
+                # Merge keys without overwriting / 合并键不覆盖
+                for k, v in val.items():
+                    if k not in cur:
+                        cur[k] = v
+```
+
+Note: Built-in protocols use `_SlottedInfoBase` (with `__slots__` direct attributes) instead of `ProtocolInfo` (with `_fields` dict). Custom protocols should always extend `ProtocolInfo`.
+
+注意：内置协议使用 `_SlottedInfoBase`（`__slots__` 直接属性），自定义协议应始终继承 `ProtocolInfo`。
+
 ## Checklist / 检查清单
 
 - [ ] `wa1kpcap/native/protocols/xxx.yaml` — YAML protocol definition (or custom path via `yaml_path`) / YAML 协议定义（或通过 `yaml_path` 指定自定义路径）

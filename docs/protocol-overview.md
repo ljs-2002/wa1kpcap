@@ -177,6 +177,43 @@ When the native engine parses an unknown protocol via YAML, it looks up the regi
 
 当原生引擎通过 YAML 解析未知协议时，会查找注册表以实例化正确的 Python 类。若未注册，则使用通用 `ProtocolInfo`。
 
+## Info Class Architecture / Info 类架构
+
+Two base classes for protocol info objects, optimized for different use cases:
+
+两种协议信息对象基类，针对不同场景优化：
+
+```
+_ProtocolInfoBase          (abstract, __slots__ = ())
+├── ProtocolInfo           (custom/YAML protocols, _fields dict)
+└── _SlottedInfoBase       (built-in protocols, direct __slots__ attributes)
+```
+
+| | `ProtocolInfo` | `_SlottedInfoBase` |
+|---|---|---|
+| Used by / 使用者 | Custom & YAML-only protocols / 自定义和纯 YAML 协议 | Built-in protocols / 内置协议 |
+| Storage / 存储 | `_fields` dict | Direct `__slots__` attributes / 直接 `__slots__` 属性 |
+| Subclass requires / 子类需要 | `__slots__ = ()` | `__slots__`, `_SLOT_NAMES`, `_SLOT_DEFAULTS` tuples |
+| Performance / 性能 | Good | ~40% faster attribute access / 属性访问快约 40% |
+
+### Flow Aggregation: merge() / 流聚合：merge()
+
+When multiple packets belong to the same flow, their protocol info is merged via `merge(self, other)`. Both base classes provide a default implementation (first-wins: copy from `other` if current value is `None`).
+
+当多个包属于同一流时，通过 `merge(self, other)` 合并协议信息。两个基类都提供默认实现（first-wins：当前值为 None 时从 other 复制）。
+
+Override `merge()` when your protocol needs special aggregation logic:
+
+当协议需要特殊聚合逻辑时，覆写 `merge()`：
+
+- List fields: append unique items (e.g., DNS queries/answers) / 列表字段：追加不重复元素
+- Dict fields: merge keys without overwriting (e.g., HTTP headers) / 字典字段：合并键不覆盖
+- Accumulation: combine values across packets (e.g., TLS handshake types) / 累积：跨包合并值
+
+Examples: `TLSInfo.merge()`, `HTTPInfo.merge()`, `DNSInfo.merge()` in `wa1kpcap/core/packet.py`.
+
+示例：`wa1kpcap/core/packet.py` 中的 `TLSInfo.merge()`、`HTTPInfo.merge()`、`DNSInfo.merge()`。
+
 ## Related Docs / 相关文档
 
 - [YAML Primitives Reference / YAML 原语参考](yaml-primitives-reference.md)

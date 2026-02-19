@@ -1,6 +1,6 @@
 # Task Plan
 
-## Status: CONFIRMED — 用户已确认所有决策
+## Status: COMPLETE — 全部阶段完成
 
 ## 概述
 
@@ -9,13 +9,13 @@
 ## Phases
 
 ### Phase 0: Git 保存当前状态
-- [ ] 提交当前所有修改（skill、文档、CLAUDE.md 等）
+- [x] 提交当前所有修改（skill、文档、CLAUDE.md 等）
 
 ### Phase 1: 文档补全 — merge() 和 Info 类继承说明
-- [ ] `docs/protocol-overview.md` — 添加 Info 类架构对比（_SlottedInfoBase vs ProtocolInfo）、merge 机制说明
-- [ ] `.claude/skills/add-custom-protocol/SKILL.md` — 添加 merge() 说明，明确继承 ProtocolInfo
-- [ ] `.claude/skills/add-yaml-protocol/SKILL.md` — 说明通用 ProtocolInfo 的默认 merge 行为
-- [ ] `docs/add-custom-protocol-guide.md` — 添加 merge() 章节
+- [x] `docs/protocol-overview.md` — 添加 Info 类架构对比（_SlottedInfoBase vs ProtocolInfo）、merge 机制说明
+- [x] `.claude/skills/add-custom-protocol/SKILL.md` — 添加 merge() 说明，明确继承 ProtocolInfo
+- [x] `.claude/skills/add-yaml-protocol/SKILL.md` — 说明通用 ProtocolInfo 的默认 merge 行为
+- [x] `docs/add-custom-protocol-guide.md` — 添加 merge() 章节
 
 ### Phase 2: 新增 5 个 built-in 协议
 
@@ -50,25 +50,25 @@
 - 文件：dhcpv6.yaml, DHCPv6Info(_SlottedInfoBase), converter, tests
 
 ### Phase 3: 默认过滤器参数
-- [ ] Analyzer 新增 `default_filter` 参数
-- [ ] 默认值：`"not arp and not icmp and not icmp6 and not (udp port 67 or udp port 68) and not (udp port 546 or udp port 547)"`
-- [ ] 与用户 `bpf_filter` 是 AND 关系：最终 = `(default_filter) and (bpf_filter)`
-- [ ] `default_filter=None` 或 `default_filter=""` 禁用
-- [ ] PacketFilter 和 NativeFilter 两条路径都支持
-- [ ] 单元测试
+- [x] Analyzer 新增 `default_filter` 参数
+- [x] 默认值：`"not arp and not icmp and not icmpv6 and not dhcp and not dhcpv6"`
+- [x] 与用户 `bpf_filter` 是 AND 关系：最终 = `(default_filter) and (bpf_filter)`
+- [x] `default_filter=None` 或 `default_filter=""` 禁用
+- [x] PacketFilter 和 NativeFilter 两条路径都支持
+- [x] BPF 修复：dhcp/dhcpv6/gre/vxlan 关键字支持 raw-byte 匹配
 
 ### Phase 4: 应用层解析开关
-- [ ] Analyzer 新增 `app_layer_parsing` 参数，类型 str，可选 `"full"` / `"port_only"` / `"none"`
-- [ ] `"full"`（默认）— 当前行为，启发式 + 端口匹配
-- [ ] `"port_only"` — 只按端口映射（field-based mapping），跳过 heuristics
-- [ ] `"none"` — TCP/UDP 之后停止，不解析应用层
-- [ ] C++ 引擎：NativeParser 构造/parse 传递 mode，ProtocolEngine::parse_layer() 中判断
-- [ ] Python dpkt 引擎：analyzer.py 中根据 mode 跳过应用层
-- [ ] 单元测试
+- [x] Analyzer 新增 `app_layer_parsing` 参数，类型 str，可选 `"full"` / `"port_only"` / `"none"`
+- [x] `"full"`（默认）— 当前行为，启发式 + 端口匹配
+- [x] `"port_only"` — 只按端口映射（field-based mapping），跳过 heuristics
+- [x] `"none"` — TCP/UDP 之后停止，不解析应用层
+- [x] C++ 引擎：NativeParser 构造/parse 传递 mode，ProtocolEngine::parse_layer() 中判断
+- [x] Python dpkt 引擎：analyzer.py 中根据 mode 跳过应用层
+- [x] 原 4 档（full/fast/port_only/none）简化为 3 档，benchmark 证实 fast 与 port_only 无差异
 
 ### Phase 5: 全量测试 + 基准测试
-- [ ] 运行全部单元测试确认无回归
-- [ ] 运行 benchmark.py 确认性能
+- [x] 运行全部单元测试确认无回归（363 passed, 2 skipped）
+- [x] 运行 benchmark 确认性能（full=20.7s, port_only=20.4s, none=20.2s）
 - [ ] 最终 git 提交
 
 ## Decisions Log
