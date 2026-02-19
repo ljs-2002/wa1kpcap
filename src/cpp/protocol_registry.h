@@ -20,4 +20,7 @@
     X(DNS,      dns,   NativeDNSInfo,      "DNSInfo")      \
     X(ARP,      arp,   NativeARPInfo,      "ARPInfo")      \
     X(ICMP,     icmp,  NativeICMPInfo,     "ICMPInfo")     \
-    X(ICMP6,    icmp6, NativeICMP6Info,    "ICMP6Info")
+    X(ICMP6,    icmp6, NativeICMP6Info,    "ICMP6Info")    \
+    X(VLAN,     vlan,  NativeVLANInfo,     "VLANInfo")     \
+    X(SLL,      sll,   NativeSLLInfo,      "SLLInfo")      \
+    X(SLL2,     sll2,  NativeSLL2Info,     "SLL2Info")

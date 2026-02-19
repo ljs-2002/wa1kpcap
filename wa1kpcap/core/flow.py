@@ -1015,11 +1015,11 @@ if TYPE_CHECKING:
     from wa1kpcap.core.packet import ParsedPacket, TLSInfo, HTTPInfo, DNSInfo, TCPInfo, UDPInfo
 
 
-def _make_canonical_key(src_ip, dst_ip, src_port, dst_port, protocol):
+def _make_canonical_key(src_ip, dst_ip, src_port, dst_port, protocol, vlan_id=0):
     """Canonical tuple key: same for A→B and B→A."""
     if (src_ip, src_port) <= (dst_ip, dst_port):
-        return (src_ip, src_port, dst_ip, dst_port, protocol)
-    return (dst_ip, dst_port, src_ip, src_port, protocol)
+        return (src_ip, src_port, dst_ip, dst_port, protocol, vlan_id)
+    return (dst_ip, dst_port, src_ip, src_port, protocol, vlan_id)
 
 
 @dataclass
@@ -1067,7 +1067,7 @@ class FlowManager:
         if result is None:
             return None
 
-        canonical, src_ip, dst_ip, src_port, dst_port, protocol = result
+        canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id = result
 
         # Single lookup with canonical tuple key
         flow = self._flows.get(canonical)
@@ -1077,7 +1077,7 @@ class FlowManager:
             if len(self._flows) >= self.config.max_flows:
                 return None
             key = FlowKey(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
-                          dst_port=dst_port, protocol=protocol)
+                          dst_port=dst_port, protocol=protocol, vlan_id=vlan_id)
             flow = Flow(key=key, start_time=pkt.timestamp, _verbose=True, _save_raw=False)
             flow._canonical_key = canonical
             self._flows[canonical] = flow
@@ -1100,7 +1100,7 @@ class FlowManager:
                     self._udp_last_seen.pop(canonical, None)
 
                     key = FlowKey(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
-                                  dst_port=dst_port, protocol=protocol)
+                                  dst_port=dst_port, protocol=protocol, vlan_id=vlan_id)
                     flow = Flow(key=key, start_time=pkt.timestamp, _verbose=True, _save_raw=False)
                     flow._canonical_key = canonical
                     self._flows[canonical] = flow
@@ -1116,13 +1116,13 @@ class FlowManager:
     def _extract_flow_tuple(self, pkt: ParsedPacket) -> tuple | None:
         """Extract canonical tuple and raw fields from packet.
 
-        Returns (canonical, src_ip, dst_ip, src_port, dst_port, protocol)
+        Returns (canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id)
         or None if packet has no IP layer.
         """
         # Fast path: use pre-computed flow key from C++ parse_to_dataclass
         cache = getattr(pkt, '_flow_key_cache', None)
         if cache is not None:
-            return cache  # already (canonical, src_ip, dst_ip, src_port, dst_port, protocol)
+            return cache  # already (canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id)
 
         # Fallback: original Python path (dpkt engine)
         ip = pkt.ip
@@ -1152,8 +1152,10 @@ class FlowManager:
             src_port = pkt.udp.sport
             dst_port = pkt.udp.dport
 
-        canonical = _make_canonical_key(src_ip, dst_ip, src_port, dst_port, protocol)
-        return canonical, src_ip, dst_ip, src_port, dst_port, protocol
+        vlan_id = pkt.vlan.vlan_id if pkt.vlan else 0
+
+        canonical = _make_canonical_key(src_ip, dst_ip, src_port, dst_port, protocol, vlan_id)
+        return canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id
 
     def _update_tcp_state(self, flow: Flow, pkt: ParsedPacket) -> None:
         """Update TCP state machine based on packet flags."""

@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-- Conda environment: `web` (Python 3.10). If the active conda env is `base`, run `conda activate web` first.
+- Conda environment: `web` (Python 3.10).
 - Python executable: `D:/miniconda3/envs/web/python.exe`
-- Platform: Windows 11, but shell commands use Unix syntax (bash).
+- Platform: Windows 11. Claude Code uses Git Bash (Unix syntax). All shell commands in this file use bash syntax.
+- In Git Bash, `conda activate` is typically unavailable. Use `python`/`pip` directly (they should already point to the conda env). If `python` is not in PATH or points to the wrong env, fall back to the full path: `"D:/miniconda3/envs/web/python.exe"` and `"D:/miniconda3/envs/web/python.exe" -m pip`.
 
 ## Language
 
@@ -19,13 +20,13 @@ The project uses scikit-build-core with CMake for the optional C++ native engine
 
 ```bash
 # Install Python package (dpkt engine only)
-"D:/miniconda3/envs/web/python.exe" -m pip install -e .
+pip install -e .
 
 # Install with native C++ engine
 rm -rf build/cp310-cp310-win_amd64/*
-"D:/miniconda3/envs/web/python.exe" -m pip install ".[native]" --force-reinstall --no-deps --no-cache-dir
+pip install ".[native]" --force-reinstall --no-deps --no-cache-dir
 
-# After native build, copy .pyd into source tree (editable install doesn't trigger C++ rebuild)
+# After native build, copy .pyd into source tree (editable install loads from source tree, not site-packages)
 cp "/d/miniconda3/envs/web/Lib/site-packages/wa1kpcap/_wa1kpcap_native.cp310-win_amd64.pyd" "/d/MyProgram/wa1kpcap1/wa1kpcap/"
 ```
 
@@ -41,19 +42,28 @@ The C++ build requires CMake 3.15+, C++17, and fetches yaml-cpp 0.8.0 via FetchC
 
 ```bash
 # Run all tests
-"D:/miniconda3/envs/web/python.exe" -m pytest tests/ -x -q
+python -m pytest tests/ -x -q
 
 # Run a single test file
-"D:/miniconda3/envs/web/python.exe" -m pytest tests/test_flow.py -x -q
+python -m pytest tests/test_flow.py -x -q
 
 # Run a specific test
-"D:/miniconda3/envs/web/python.exe" -m pytest tests/test_flow.py::TestFlowManager::test_add_packet -x -q
+python -m pytest tests/test_flow.py::TestFlowManager::test_add_packet -x -q
 
-# Benchmark dpkt vs native consistency
-"D:/miniconda3/envs/web/python.exe" benchmark.py
+# Benchmark dpkt vs native vs flowcontainer
+python benchmark.py              # full: consistency check + speed benchmark + report
+python benchmark.py consistency  # consistency check only (dpkt vs native vs flowcontainer on test/multi.pcap)
+python benchmark.py speed        # speed benchmark only (per-file dpkt vs native vs flowcontainer on datasets)
+python benchmark.py lite-speed   # quick dpkt vs native speed comparison on a few specific pcap files
 ```
 
-Coverage threshold is 80%. There are ~285 tests across 17 test files.
+Coverage is 68% (4958 statements, 1575 missed). There are 331 tests across 18 test files (329 passed, 2 skipped).
+
+`benchmark.py` compares wa1kpcap's dpkt engine, native C++ engine, and flowcontainer. It has four modes:
+- `all` (default): runs both consistency check and speed benchmark, writes a markdown report to `benchmark_report.md`.
+- `consistency`: compares flow extraction results (5-tuple matching, IAT comparison) between dpkt, native, and flowcontainer on `test/multi.pcap`.
+- `speed`: benchmarks per-file throughput (time, flows, MB/s, speedup) across datasets configured in `DATASETS`.
+- `lite-speed`: quick dpkt vs native comparison on a few hardcoded pcap files (no report file).
 
 ## Architecture
 
@@ -68,14 +78,14 @@ Both engines feed into the same Python flow management pipeline: `FlowManager` g
 
 ### C++ Native Engine (`src/cpp/`)
 
-The C++ engine is YAML-configuration-driven with 9 parsing primitives: `fixed`, `bitfield`, `length_prefixed`, `computed`, `tlv`, `counted_list`, `rest`, `hardcoded`, `ext_list`. Protocol definitions live in `wa1kpcap/native/protocols/*.yaml`.
+The C++ engine is YAML-configuration-driven with 10 parsing primitives: `fixed`, `bitfield`, `length_prefixed`, `computed`, `tlv`, `counted_list`, `rest`, `hardcoded`, `prefixed_list`, `repeat`. Protocol definitions live in `wa1kpcap/native/protocols/*.yaml`.
 
 Key mechanisms in `protocol_engine.cpp`:
 - `header_size_field`: After parsing fixed fields, adjusts `bytes_consumed` to the computed header size (handles IP/TCP options).
 - `total_length_field`: Bounds `remaining` bytes to IP total_length, excluding Ethernet padding.
 - Computed fields (type `COMPUTED`) must evaluate even when `offset >= len` — they consume 0 bytes but produce values like `flags` and `header_length` that downstream logic depends on.
 - `parse_packet()` chains layers via `next_protocol` mappings until no more protocols match or data runs out.
-- `ext_list` primitive: TLS-style extension list with `[total_len][type][len][data]...` format. Sub-protocol fields are merged into the parent FieldMap with a prefix (e.g., `tls_ext_sni.server_name`). Used by `tls_client_hello.yaml` and `tls_server_hello.yaml` to parse TLS extensions via YAML instead of hardcoded C++.
+- `prefixed_list` primitive: length-prefixed item list with optional TLV dispatch. Two modes: Mode A (typed items) reads `[total_len][type][len][data]...` and dispatches sub-protocols via `type_mapping`; Mode B (simple) reads `[total_len][item_len][data]...` with `item_format`. Sub-protocol fields are merged into the parent FieldMap with a prefix (e.g., `tls_ext_sni.server_name`). Used by `tls_client_hello.yaml` and `tls_server_hello.yaml` to parse TLS extensions via YAML instead of hardcoded C++.
 - TLS is NOT chained from TCP via `next_protocol` — TCP's YAML has no next_protocol to TLS. Instead, TLS is parsed via a separate reassembly path: Python buffers TCP payloads, extracts complete TLS records, then calls C++ `NativeParser.parse_tls_record()` which uses `parse_from_protocol_struct("tls_record", ...)` to parse starting from the TLS layer.
 
 #### Dispatch Tables
@@ -119,8 +129,10 @@ Protocol layer data uses a two-tier class hierarchy under a common `_ProtocolInf
 To add a new protocol without modifying C++:
 1. Create `<name>.yaml` in `wa1kpcap/native/protocols/` (or a custom directory).
 2. Write a `ProtocolInfo` subclass with typed properties and a `merge()` method.
-3. Register it: `ProtocolRegistry.get_instance().register('<name>', MyProtoInfo)`.
-4. Add the `next_protocol` mapping that routes to it (e.g., in `udp.yaml`: `7777: myproto`).
+3. Register it: `ProtocolRegistry.get_instance().register('<name>', MyProtoInfo, yaml_path="/path/to/myproto.yaml", routing={"udp": {5000: "myproto"}})`.
+4. `NativeEngine` auto-loads `yaml_path` files and injects `routing` mappings at init time — no need to modify built-in YAML files.
+
+All fast-path parsers (ethernet, ipv4, ipv6, tcp, udp, vlan, sll, sll2) have YAML fallback: when the hardcoded switch doesn't match, they query `yaml_next_protocol_lookup()` against the YAML `next_protocol.mapping`. This means injected routing works for both fast-path and slow-path protocols. C++ also exposes `NativeParser.load_extra_file()` and `NativeParser.add_protocol_routing()` for direct use.
 
 To add a new built-in protocol (with C++ fast path):
 1. Follow the steps in `docs/add-builtin-protocol-guide.md` or use `/add-builtin-protocol`.
@@ -150,7 +162,7 @@ Sequence features: `packet_lengths`, `ip_lengths`, `trans_lengths`, `app_lengths
 ## YAML Protocol Configs
 
 Located in `wa1kpcap/native/protocols/`. When adding a new protocol:
-1. Create `<name>.yaml` with `name`, `fields` (using the 9 primitives), and optionally `next_protocol`, `header_size_field`, `total_length_field`.
+1. Create `<name>.yaml` with `name`, `fields` (using the 10 primitives), and optionally `next_protocol`, `header_size_field`, `total_length_field`.
 2. Add the DLT or next_protocol mapping that routes to it.
 3. If the protocol has variable-length headers, declare `header_size_field` pointing to a computed field.
 4. If the protocol carries a total length (like IPv4/IPv6), declare `total_length_field` to prevent Ethernet padding from inflating payload sizes.

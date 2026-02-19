@@ -13,9 +13,19 @@ Need to add a new protocol?
 ├─ Is it performance-critical (millions of packets)?
 │  是否性能关键（百万级数据包）？
 │  │
-│  ├─ YES → Built-in Protocol (C++ fast-path + YAML + Python)
-│  │        内置协议（C++ 快速路径 + YAML + Python）
+│  ├─ YES → Built-in Protocol (C++ struct + dispatch table + YAML + Python)
+│  │        内置协议（C++ 结构体 + 分发表 + YAML + Python）
 │  │        → See: docs/add-builtin-protocol-guide.md
+│  │        │
+│  │        ├─ Simple fixed-layout wire format?
+│  │        │  简单固定布局的线上格式？
+│  │        │  (fixed offsets, no variable-length lists)
+│  │        │  │
+│  │        │  ├─ YES → Type A: Fast-Path (fast_parse_xxx + fill_xxx)
+│  │        │  │        快速路径（如 Ethernet, ARP, ICMP, TCP, UDP）
+│  │        │  │
+│  │        │  └─ NO → Type B: Fill-Only (fill_xxx only, YAML parses)
+│  │        │          仅填充（如 DNS, TLS 系列）
 │  │
 │  └─ NO ──┐
 │           │
@@ -47,22 +57,35 @@ Need to add a new protocol?
 │                            │  │  Fast Path      │  │ │
 │                            │  │  (C++ structs)  │  │ │
 │                            │  │  ETH/IP/TCP/..  │  │ │
+│                            │  │  [Type A only]  │  │ │
 │                            │  └───────┬────────┘  │ │
 │                            │          │ fallback   │ │
 │                            │  ┌───────▼────────┐  │ │
 │                            │  │  Slow Path      │  │ │
 │                            │  │  (YAML-driven)  │  │ │
 │                            │  │  Any protocol   │  │ │
+│                            │  │  [Type A+B+all] │  │ │
+│                            │  └───────┬────────┘  │ │
+│                            │          │            │ │
+│                            │  ┌───────▼────────┐  │ │
+│                            │  │  Dispatch Tables│  │ │
+│                            │  │  unordered_map  │  │ │
+│                            │  │  fast_dispatch_ │  │ │
+│                            │  │  fill_dispatch_ │  │ │
 │                            │  └────────────────┘  │ │
 │                            └──────────────────────┘ │
 ├─────────────────────────────────────────────────────┤
 │  ParsedPacket                                       │
-│  ├── .eth  (EthernetInfo)                           │
-│  ├── .ip   (IPInfo)     .ip6  (IP6Info)             │
-│  ├── .tcp  (TCPInfo)    .udp  (UDPInfo)             │
-│  ├── .icmp (ICMPInfo)   .icmp6 (ICMP6Info)          │
-│  ├── .arp  (ARPInfo)                                │
-│  ├── .tls  (TLSInfo)    .dns  (DNSInfo)             │
+│  ├── .eth  (EthernetInfo)    — Type A fast-path     │
+│  ├── .ip   (IPInfo)          — Type A fast-path     │
+│  ├── .ip6  (IP6Info)         — Type A fast-path     │
+│  ├── .tcp  (TCPInfo)         — Type A fast-path     │
+│  ├── .udp  (UDPInfo)         — Type A fast-path     │
+│  ├── .arp  (ARPInfo)         — Type A fast-path     │
+│  ├── .icmp (ICMPInfo)        — Type A fast-path     │
+│  ├── .icmp6 (ICMP6Info)      — Type A fast-path     │
+│  ├── .dns  (DNSInfo)         — Type B fill-only     │
+│  ├── .tls  (TLSInfo)         — Type B fill-only     │
 │  └── .layers["custom"]  (ProtocolInfo / custom cls) │
 └─────────────────────────────────────────────────────┘
 ```
@@ -74,9 +97,21 @@ Need to add a new protocol?
 | Files to create / 需创建文件 | 1 YAML | 1 YAML + 1 Python class | YAML + C++ struct + C++ functions + Python class + bindings |
 | C++ changes / C++ 改动 | None / 无 | None / 无 | Yes / 是 |
 | Rebuild required / 需重新编译 | No / 否 | No / 否 | Yes / 是 |
+| Parent YAML edit / 编辑父 YAML | Yes or `routing` param / 是或 `routing` 参数 | No (`routing` param) / 否（`routing` 参数） | Yes / 是 |
 | Access pattern / 访问方式 | `pkt.layers["name"]` | `pkt.layers["name"]` | `pkt.protocol_name` (typed property) |
-| Performance / 性能 | Good (YAML slow-path) | Good (YAML slow-path) | Best (C++ fast-path) |
+| Performance / 性能 | Good (YAML slow-path) | Good (YAML slow-path) | Best (Type A: C++ fast-path) / Good (Type B: YAML + fill) |
 | Use case / 适用场景 | Quick field extraction / 快速字段提取 | Need Python properties / 需要 Python 属性 | Core protocols, high throughput / 核心协议，高吞吐 |
+
+## Built-in Protocol Subtypes / 内置协议子类型
+
+| | Type A: Fast-Path / 快速路径 | Type B: Fill-Only / 仅填充 |
+|---|---|---|
+| C++ functions / C++ 函数 | `fast_parse_xxx` + `fill_xxx` | `fill_xxx` only |
+| Dispatch tables / 分发表 | `fast_dispatch_` + `fill_dispatch_` | `fill_dispatch_` only |
+| Parsing / 解析 | C++ direct byte parsing (hot path) | YAML engine (slow path) |
+| YAML file / YAML 文件 | Optional (slow-path fallback) | Required (primary parser) |
+| Best for / 适用于 | Simple fixed-layout formats / 简单固定布局 | Complex variable formats / 复杂可变格式 |
+| Examples / 示例 | Ethernet, IPv4, TCP, UDP, ARP, ICMP | DNS, TLS series |
 
 ## Key Concepts / 关键概念
 
@@ -98,6 +133,19 @@ This macro is expanded in `parsed_packet.h` (struct fields + has-flags) and `bin
 
 该宏在 `parsed_packet.h`（结构体字段 + has 标志）和 `bindings.cpp`（Python 类缓存）中展开。
 
+### Dispatch Tables / 分发表
+
+The C++ engine uses `unordered_map` dispatch tables (populated in the `ProtocolEngine` constructor) instead of if-else chains:
+
+C++ 引擎使用 `unordered_map` 分发表（在 `ProtocolEngine` 构造函数中填充）而非 if-else 链：
+
+- `fast_dispatch_`: maps protocol name → fast-path parser function (Type A protocols only)
+- `fill_dispatch_`: maps protocol name → fill function (both Type A and Type B protocols)
+
+New built-in protocols register into these tables by adding lambdas in the constructor. See `src/cpp/protocol_engine.cpp` for examples.
+
+新的内置协议通过在构造函数中添加 lambda 注册到这些表中。参见 `src/cpp/protocol_engine.cpp` 中的示例。
+
 ### ProtocolRegistry (Python) / 协议注册表（Python）
 
 Custom Python protocol classes are registered via:
@@ -106,8 +154,24 @@ Custom Python protocol classes are registered via:
 
 ```python
 from wa1kpcap.core.packet import ProtocolRegistry
-ProtocolRegistry.get_instance().register("my_proto", MyProtoInfo)
+
+ProtocolRegistry.get_instance().register(
+    "my_proto",
+    MyProtoInfo,
+    yaml_path="/path/to/my_proto.yaml",       # optional: extra YAML file to load
+    routing={"udp": {5000: "my_proto"}},       # optional: inject next_protocol mappings
+)
 ```
+
+- `yaml_path`: Loaded by `NativeParser.load_extra_file()` at engine init. Use when the YAML file is outside the default `wa1kpcap/native/protocols/` directory.
+- `routing`: Injected via `NativeParser.add_protocol_routing()` at engine init. Format: `{parent_proto: {value: target_proto}}`. Eliminates the need to edit built-in YAML files.
+
+- `yaml_path`：引擎初始化时由 `NativeParser.load_extra_file()` 加载。当 YAML 文件不在默认目录时使用。
+- `routing`：引擎初始化时由 `NativeParser.add_protocol_routing()` 注入。格式：`{父协议名: {值: 目标协议名}}`。无需编辑内置 YAML 文件。
+
+All fast-path parsers (ethernet, ipv4, ipv6, tcp, udp, vlan, sll, sll2) have YAML fallback: when the hardcoded switch doesn't match, they query the YAML `next_protocol.mapping`. This means injected routing works for both fast-path and slow-path protocols.
+
+所有快速路径解析器（ethernet、ipv4、ipv6、tcp、udp、vlan、sll、sll2）均有 YAML 回退：当硬编码 switch 不匹配时，会查询 YAML 的 `next_protocol.mapping`。因此注入的路由对快速路径和慢速路径协议均有效。
 
 When the native engine parses an unknown protocol via YAML, it looks up the registry to instantiate the correct Python class. If not registered, a generic `ProtocolInfo` is used.
 

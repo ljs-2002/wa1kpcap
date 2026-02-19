@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
+#include <functional>
 #include <chrono>
 #include <atomic>
 
@@ -151,12 +153,16 @@ private:
     void fill_arp(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_icmp(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_icmpv6(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_vlan(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_sll(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_sll2(NativeParsedPacket& pkt, const FieldMap& fm) const;
 
     // Fast-path: parse directly from buf into struct, bypassing FieldMap entirely.
     // Returns {bytes_consumed, next_protocol}. Returns {0, ""} if buf too short.
     struct FastResult {
         size_t bytes_consumed = 0;
         std::string next_protocol;
+        bool bounds_remaining = false;  // true if ip_len should bound remaining
     };
     FastResult fast_parse_ethernet(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_ipv4(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
@@ -166,6 +172,9 @@ private:
     FastResult fast_parse_arp(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_icmp(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_icmpv6(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_vlan(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_sll(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_sll2(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
 
     // Merge a single TLS parse result into pkt.tls (first-wins for most fields, accumulate handshake_types)
     void merge_tls(NativeParsedPacket& pkt, const NativeTLSInfo& src) const;
@@ -175,7 +184,33 @@ private:
         const std::vector<HeuristicRule>& rules,
         const uint8_t* payload, size_t payload_len) const;
 
+    // YAML fallback: look up next_protocol mapping from YAML definition
+    std::string yaml_next_protocol_lookup(const std::string& proto_name, int value) const;
+
     const YamlLoader& loader_;
+
+    // ── Dispatch tables (populated in constructor) ──
+
+    // Fast-path: protocol name → parser function
+    // Unified signature: all receive (buf, len, remaining, pkt). Protocols that
+    // don't need remaining simply ignore it.
+    using FastParseFn = std::function<FastResult(const uint8_t*, size_t, size_t, NativeParsedPacket&)>;
+    std::unordered_map<std::string, FastParseFn> fast_dispatch_;
+
+    // Slow-path fill: protocol name → fill function
+    // Context struct passed to fill functions for protocols that need extra state
+    struct SlowFillContext {
+        NativeParsedPacket& pkt;
+        FieldMap& fields;
+        const uint8_t* cur;       // current position in packet buffer
+        size_t bytes_consumed;    // bytes consumed by parse_layer
+        size_t remaining;         // remaining bytes after current layer
+        bool& has_tls;
+        std::map<std::string, FieldMap>& tls_layers;
+        const std::string& proto_name;
+    };
+    using SlowFillFn = std::function<void(SlowFillContext&)>;
+    std::unordered_map<std::string, SlowFillFn> fill_dispatch_;
 };
 
 // Top-level parser exposed to Python via pybind11
@@ -192,6 +227,12 @@ public:
 
     // Parse a TLS record buffer starting from tls_record protocol, return struct with TLS filled.
     NativeParsedPacket parse_tls_record(py::bytes buf);
+
+    // Load an additional YAML protocol file at runtime
+    void load_extra_file(const std::string& file_path);
+
+    // Inject a next_protocol mapping into an existing protocol's routing table
+    void add_protocol_routing(const std::string& parent_proto, int value, const std::string& target_proto);
 
     // Access the underlying engine (for NativePipeline zero-copy path)
     const ProtocolEngine& engine() const { return engine_; }

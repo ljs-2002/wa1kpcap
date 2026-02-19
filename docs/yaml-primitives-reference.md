@@ -44,6 +44,7 @@ Reads a fixed number of bytes and interprets them according to `format`.
   type: fixed
   size: 2          # bytes to read / 读取字节数
   format: uint     # interpretation format / 解释格式
+  endian: big      # (optional, default "big") byte order / 字节序，可选 "little"
 ```
 
 ### 2. `bitfield` — Bit-Level Fields / 位域字段
@@ -74,6 +75,7 @@ Reads a length prefix of `length_size` bytes, then reads that many bytes of data
   type: length_prefixed
   length_size: 1   # bytes for the length prefix / 长度前缀字节数
   format: bytes    # data interpretation / 数据解释格式
+  # sub_protocol: proto_name  # (optional) parse content as sub-protocol / 将内容解析为子协议
 ```
 
 ### 4. `computed` — Computed Field / 计算字段
@@ -92,11 +94,27 @@ Supported operators: `+`, `-`, `*`, `/` (integer division). Operands are field n
 
 支持运算符：`+`、`-`、`*`、`/`（整数除法）。操作数为字段名或整数字面量。
 
-### 5. `counted_list` — Counted Array / 计数数组
+### 5. `tlv` — Type-Length-Value / 类型-长度-值
 
-Reads `count_field` items, each of `size` bytes, interpreted by `format`. Returns a list.
+Loops over TLV entries until the buffer is exhausted. Each entry has a type tag, a length, and a value. Sub-protocols can be dispatched based on the type tag.
 
-读取 `count_field` 个元素，每个 `size` 字节，按 `format` 解释。返回列表。
+循环读取 TLV 条目直到缓冲区耗尽。每个条目包含类型标签、长度和值。可根据类型标签分发子协议。
+
+```yaml
+- name: options
+  type: tlv
+  type_size: 1           # bytes for the type tag / 类型标签字节数
+  length_size: 1         # bytes for the length / 长度字节数
+  type_mapping:          # (optional) type value → sub-protocol / 类型值 → 子协议
+    1: option_mss
+    2: option_window_scale
+```
+
+### 6. `counted_list` — Counted Array / 计数数组
+
+Reads `count_field` items, each of `size` bytes, interpreted by `format`. Returns a list. Alternatively, use `item_protocol` to parse each item as a sub-protocol.
+
+读取 `count_field` 个元素，每个 `size` 字节，按 `format` 解释。返回列表。也可用 `item_protocol` 将每个元素解析为子协议。
 
 ```yaml
 - name: cipher_suites
@@ -104,9 +122,22 @@ Reads `count_field` items, each of `size` bytes, interpreted by `format`. Return
   count_field: cipher_suites_count  # field with item count / 元素计数字段
   size: 2                           # bytes per item / 每个元素字节数
   format: uint
+  # item_protocol: proto_name      # (optional) parse each item as sub-protocol / 将每项解析为子协议
 ```
 
-### 6. `prefixed_list` — TLV / Length-Prefixed Item List / TLV/长度前缀项列表
+### 7. `rest` — Remaining Bytes / 剩余字节
+
+Consumes all remaining bytes in the buffer. Returns raw bytes by default, or the byte count if a non-bytes format is specified.
+
+消耗缓冲区中的所有剩余字节。默认返回原始字节，如果指定了非 bytes 格式则返回字节数。
+
+```yaml
+- name: payload
+  type: rest
+  format: bytes          # (optional, default "bytes") / （可选，默认 "bytes"）
+```
+
+### 8. `prefixed_list` — TLV / Length-Prefixed Item List / TLV/长度前缀项列表
 
 Reads a list of items from a length-prefixed container. Two modes:
 
@@ -135,7 +166,7 @@ Reads a list of items from a length-prefixed container. Two modes:
   item_format: string    # each item is a length-prefixed string / 每项为长度前缀字符串
 ```
 
-### 7. `hardcoded` — Custom C++ Parser / 自定义 C++ 解析器
+### 9. `hardcoded` — Custom C++ Parser / 自定义 C++ 解析器
 
 Delegates parsing to a named C++ function. Used for protocols that cannot be expressed in YAML (e.g., NFLOG with its complex TLV structure).
 
@@ -147,7 +178,7 @@ Delegates parsing to a named C++ function. Used for protocols that cannot be exp
   parser: nflog_payload   # C++ function name / C++ 函数名
 ```
 
-### 8. `repeat` — Repeated Sub-Protocol / 重复子协议
+### 10. `repeat` — Repeated Sub-Protocol / 重复子协议
 
 Repeatedly parses a sub-protocol from the remaining buffer until exhausted. Results are merged into the parent output.
 
@@ -164,9 +195,9 @@ Repeatedly parses a sub-protocol from the remaining buffer until exhausted. Resu
 
 ## Format Types / 格式类型
 
-Used with `fixed`, `length_prefixed`, and `counted_list` primitives.
+Used with `fixed`, `length_prefixed`, `counted_list`, and `rest` primitives.
 
-用于 `fixed`、`length_prefixed` 和 `counted_list` 原语。
+用于 `fixed`、`length_prefixed`、`counted_list` 和 `rest` 原语。
 
 | Format | Description / 描述 | Example |
 |--------|-------------------|---------|
@@ -218,9 +249,9 @@ next_protocol:
           byte_le: 4
 ```
 
-Condition operators: `byte_eq`, `byte_in`, `byte_le`, `byte_ge`.
+Condition operators: `byte_eq`, `byte_in`, `byte_le`, `prefix_in`.
 
-条件运算符：`byte_eq`、`byte_in`、`byte_le`、`byte_ge`。
+条件运算符：`byte_eq`、`byte_in`、`byte_le`、`prefix_in`。
 
 ---
 

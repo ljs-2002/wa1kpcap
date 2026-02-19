@@ -16,6 +16,9 @@ from wa1kpcap.core.packet import (
     TLSInfo,
     HTTPInfo,
     DNSInfo,
+    VLANInfo,
+    SLLInfo,
+    SLL2Info,
 )
 from wa1kpcap.core.reader import PcapReader, LinkLayerType
 
@@ -39,6 +42,9 @@ __all__ = [
     'TLSInfo',
     'HTTPInfo',
     'DNSInfo',
+    'VLANInfo',
+    'SLLInfo',
+    'SLL2Info',
     'PcapReader',
     'LinkLayerType',
 ]

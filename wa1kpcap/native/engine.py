@@ -23,6 +23,19 @@ class NativeEngine:
         # Locate YAML protocol configs
         protocols_dir = str(Path(__file__).parent / "protocols")
         self._parser = _native.NativeParser(protocols_dir)
+
+        # Load extra protocol YAML files from registry
+        from wa1kpcap.core.packet import ProtocolRegistry
+        registry = ProtocolRegistry.get_instance()
+        for name, path in registry.get_yaml_paths().items():
+            self._parser.load_extra_file(str(path))
+
+        # Inject protocol routing from registry
+        for name, routing in registry.get_routing().items():
+            for parent_proto, mappings in routing.items():
+                for value, target in mappings.items():
+                    self._parser.add_protocol_routing(parent_proto, value, target)
+
         self._filter = _native.NativeFilter(bpf_filter or "") if bpf_filter else None
         # Cache whether filter can be fully evaluated on raw bytes
         self._filter_can_raw = (

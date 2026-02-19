@@ -43,6 +43,22 @@ fields:
 
 ### Step 2: Wire Parent Protocol Dispatch / 接入父协议分发
 
+There are two ways to route a parent protocol to your new protocol:
+
+有两种方式将父协议路由到新协议：
+
+**Option A: Via `ProtocolRegistry.register()` (recommended, no YAML edits needed)**
+
+**方式 A：通过 `ProtocolRegistry.register()`（推荐，无需编辑 YAML）**
+
+Pass `routing` when registering (see Step 4). The engine injects the mapping at init time. This keeps all custom protocol config in one place.
+
+注册时传入 `routing`（见步骤 4）。引擎在初始化时注入映射。这将所有自定义协议配置集中在一处。
+
+**Option B: Edit parent protocol's YAML directly**
+
+**方式 B：直接编辑父协议的 YAML**
+
 Edit the parent protocol's YAML to route to your new protocol.
 
 编辑父协议的 YAML 以路由到新协议。
@@ -118,8 +134,29 @@ Register your class so the engine instantiates it (instead of generic `ProtocolI
 ```python
 from wa1kpcap.core.packet import ProtocolRegistry
 
-ProtocolRegistry.get_instance().register("my_protocol", MyProtocolInfo)
+ProtocolRegistry.get_instance().register(
+    "my_protocol",
+    MyProtocolInfo,
+    yaml_path="/path/to/my_protocol.yaml",  # optional: load extra YAML file
+    routing={                                 # optional: inject next_protocol mappings
+        "udp": {5000: "my_protocol"},         # UDP port 5000 → my_protocol
+    },
+)
 ```
+
+Parameters:
+
+- `name` (str): Protocol name, must match the `name` field in the YAML file.
+- `info_class` (type): Python class to instantiate for this protocol.
+- `yaml_path` (str, optional): Path to an extra YAML protocol definition file. Loaded by `NativeParser.load_extra_file()` at engine init. Use this when the YAML file is outside the default `wa1kpcap/native/protocols/` directory.
+- `routing` (dict, optional): Next-protocol mappings to inject into existing protocols. Format: `{parent_proto: {value: target_proto}}`. Injected via `NativeParser.add_protocol_routing()` at engine init. All fast-path parsers (ethernet, ipv4, ipv6, tcp, udp, vlan, sll, sll2) have YAML fallback — injected routing works for both fast-path and slow-path protocols.
+
+参数说明：
+
+- `name` (str)：协议名称，必须与 YAML 文件中的 `name` 字段一致。
+- `info_class` (type)：用于实例化该协议的 Python 类。
+- `yaml_path` (str, 可选)：额外 YAML 协议定义文件的路径。引擎初始化时由 `NativeParser.load_extra_file()` 加载。当 YAML 文件不在默认的 `wa1kpcap/native/protocols/` 目录时使用。
+- `routing` (dict, 可选)：注入到已有协议的 next_protocol 映射。格式：`{父协议名: {值: 目标协议名}}`。引擎初始化时由 `NativeParser.add_protocol_routing()` 注入。所有快速路径解析器（ethernet、ipv4、ipv6、tcp、udp、vlan、sll、sll2）均有 YAML 回退——注入的路由对快速路径和慢速路径协议均有效。
 
 Call this at module import time (e.g., in your package's `__init__.py`).
 
@@ -238,13 +275,17 @@ class QUICInitialInfo(ProtocolInfo):
     def is_quic_v1(self) -> bool:
         return self.version == 0x00000001
 
-ProtocolRegistry.get_instance().register("quic_initial", QUICInitialInfo)
+ProtocolRegistry.get_instance().register(
+    "quic_initial",
+    QUICInitialInfo,
+    routing={"udp": {443: "quic_initial"}},  # QUIC typically on UDP 443
+)
 ```
 
 ## Checklist / 检查清单
 
-- [ ] `wa1kpcap/native/protocols/xxx.yaml` — YAML protocol definition / YAML 协议定义
-- [ ] Parent protocol YAML — `next_protocol` mapping or heuristic / 父协议 YAML 映射
+- [ ] `wa1kpcap/native/protocols/xxx.yaml` — YAML protocol definition (or custom path via `yaml_path`) / YAML 协议定义（或通过 `yaml_path` 指定自定义路径）
+- [ ] Parent protocol routing — via `routing` param in `register()` (recommended) or edit parent YAML / 父协议路由——通过 `register()` 的 `routing` 参数（推荐）或编辑父协议 YAML
 - [ ] Python Info class (extends `ProtocolInfo`) / Python Info 类
-- [ ] `ProtocolRegistry.register()` call / 注册调用
+- [ ] `ProtocolRegistry.register()` call with optional `yaml_path` and `routing` / 注册调用（可选 `yaml_path` 和 `routing`）
 - [ ] Tests / 测试
