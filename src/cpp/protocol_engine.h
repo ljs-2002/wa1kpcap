@@ -109,9 +109,11 @@ public:
                           bool save_raw_bytes = false) const;
 
     // Parse full packet into C++ struct (bypasses dict + converter.py).
+    // app_layer_mode: 0=full, 1=fast, 2=port_only, 3=none
     NativeParsedPacket parse_packet_struct(const uint8_t* buf, size_t len,
                                            uint32_t link_type,
-                                           bool save_raw_bytes = false) const;
+                                           bool save_raw_bytes = false,
+                                           int app_layer_mode = 0) const;
 
     // Parse from a specific protocol (not from link_type), return struct with TLS filled.
     NativeParsedPacket parse_from_protocol_struct(const uint8_t* buf, size_t len,
@@ -156,6 +158,9 @@ private:
     void fill_vlan(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_sll(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_sll2(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_gre(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_vxlan(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_mpls(NativeParsedPacket& pkt, const FieldMap& fm) const;
 
     // Fast-path: parse directly from buf into struct, bypassing FieldMap entirely.
     // Returns {bytes_consumed, next_protocol}. Returns {0, ""} if buf too short.
@@ -175,6 +180,11 @@ private:
     FastResult fast_parse_vlan(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_sll(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_sll2(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_gre(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_vxlan(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_mpls(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_dhcp(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_dhcpv6(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
 
     // Merge a single TLS parse result into pkt.tls (first-wins for most fields, accumulate handshake_types)
     void merge_tls(NativeParsedPacket& pkt, const NativeTLSInfo& src) const;
@@ -222,8 +232,10 @@ public:
     py::dict parse_packet(py::bytes buf, uint32_t link_type, bool save_raw_bytes = false);
 
     // Parse a raw packet buffer into a C++ struct (fast path)
+    // app_layer_mode: 0=full, 1=fast, 2=port_only, 3=none
     NativeParsedPacket parse_packet_struct(py::bytes buf, uint32_t link_type,
-                                            bool save_raw_bytes = false);
+                                            bool save_raw_bytes = false,
+                                            int app_layer_mode = 0);
 
     // Parse a TLS record buffer starting from tls_record protocol, return struct with TLS filled.
     NativeParsedPacket parse_tls_record(py::bytes buf);

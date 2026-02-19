@@ -1,0 +1,12 @@
+name: dhcpv6
+fields:
+  - name: msg_type
+    type: fixed
+    size: 1
+    format: uint
+  - name: transaction_id
+    type: fixed
+    size: 3
+    format: uint
+  - name: options_raw
+    type: rest

@@ -151,6 +151,48 @@ struct NativeSLL2Info {
     std::string addr;           // 8-byte link-layer address as hex string
 };
 
+struct NativeGREInfo {
+    int64_t flags = 0;          // Full 2-byte flags+version field
+    int64_t protocol_type = 0;  // Ethertype of encapsulated payload
+    int64_t checksum = 0;       // Optional (present if C bit set)
+    int64_t key = 0;            // Optional (present if K bit set)
+    int64_t sequence = 0;       // Optional (present if S bit set)
+    bool has_checksum = false;
+    bool has_key = false;
+    bool has_sequence = false;
+};
+
+struct NativeVXLANInfo {
+    int64_t flags = 0;          // 1 byte flags (bit 3 = VNI valid)
+    int64_t vni = 0;            // 24-bit VXLAN Network Identifier
+};
+
+struct NativeMPLSInfo {
+    int64_t label = 0;          // 20-bit label of bottom-of-stack entry
+    int64_t tc = 0;             // 3-bit traffic class
+    int64_t ttl = 0;            // 8-bit TTL
+    int64_t stack_depth = 0;    // Number of label entries in the stack
+    bool bottom_of_stack = false;
+};
+
+struct NativeDHCPInfo {
+    int64_t op = 0;             // 1=BOOTREQUEST, 2=BOOTREPLY
+    int64_t htype = 0;          // Hardware type (1=Ethernet)
+    int64_t xid = 0;            // Transaction ID
+    std::string ciaddr;         // Client IP
+    std::string yiaddr;         // 'Your' IP
+    std::string siaddr;         // Server IP
+    std::string giaddr;         // Gateway IP
+    std::string chaddr;         // Client hardware address (MAC)
+    std::vector<uint8_t> options_raw; // Raw options bytes for user-side parsing
+};
+
+struct NativeDHCPv6Info {
+    int64_t msg_type = 0;       // Message type (1=Solicit, 2=Advertise, etc.)
+    int64_t transaction_id = 0; // 24-bit transaction ID
+    std::vector<uint8_t> options_raw; // Raw options bytes for user-side parsing
+};
+
 struct NativeParsedPacket {
     double timestamp = 0.0;
     std::string raw_data;         // stored as py::bytes

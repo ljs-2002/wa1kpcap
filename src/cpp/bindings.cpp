@@ -208,6 +208,49 @@ static py::object build_dataclass_from_struct(
             pkt.sll2.addr, cc.empty_bytes);
     }
 
+    py::object gre = cc.none;
+    if (pkt.has_gre) {
+        gre = cc.GREInfo_cls(
+            pkt.gre.flags, pkt.gre.protocol_type,
+            pkt.gre.has_checksum ? py::cast(pkt.gre.checksum) : cc.none,
+            pkt.gre.has_key ? py::cast(pkt.gre.key) : cc.none,
+            pkt.gre.has_sequence ? py::cast(pkt.gre.sequence) : cc.none,
+            cc.empty_bytes);
+    }
+
+    py::object vxlan = cc.none;
+    if (pkt.has_vxlan) {
+        vxlan = cc.VXLANInfo_cls(pkt.vxlan.flags, pkt.vxlan.vni, cc.empty_bytes);
+    }
+
+    py::object mpls = cc.none;
+    if (pkt.has_mpls) {
+        mpls = cc.MPLSInfo_cls(
+            pkt.mpls.label, pkt.mpls.tc, pkt.mpls.ttl,
+            pkt.mpls.stack_depth, pkt.mpls.bottom_of_stack,
+            cc.empty_bytes);
+    }
+
+    py::object dhcp = cc.none;
+    if (pkt.has_dhcp) {
+        py::bytes opts_raw(reinterpret_cast<const char*>(pkt.dhcp.options_raw.data()),
+                           pkt.dhcp.options_raw.size());
+        dhcp = cc.DHCPInfo_cls(
+            pkt.dhcp.op, pkt.dhcp.htype, pkt.dhcp.xid,
+            pkt.dhcp.ciaddr, pkt.dhcp.yiaddr, pkt.dhcp.siaddr,
+            pkt.dhcp.giaddr, pkt.dhcp.chaddr,
+            opts_raw, cc.empty_bytes);
+    }
+
+    py::object dhcpv6 = cc.none;
+    if (pkt.has_dhcpv6) {
+        py::bytes opts_raw(reinterpret_cast<const char*>(pkt.dhcpv6.options_raw.data()),
+                           pkt.dhcpv6.options_raw.size());
+        dhcpv6 = cc.DHCPv6Info_cls(
+            pkt.dhcpv6.msg_type, pkt.dhcpv6.transaction_id,
+            opts_raw, cc.empty_bytes);
+    }
+
     py::object raw_payload = pkt._raw_tcp_payload.empty()
         ? cc.empty_bytes : py::bytes(pkt._raw_tcp_payload);
 
@@ -254,7 +297,7 @@ static py::object build_dataclass_from_struct(
         cc.none, cc.none, cc.none, cc.none,
         raw_payload, flow_key_cache, extra_layers_py,
         arp, icmp6,
-        vlan, sll, sll2);
+        vlan, sll, sll2, gre, vxlan, mpls, dhcp, dhcpv6);
 }
 
 // Standalone function for compute_array_stats (MSVC compatibility)
@@ -635,6 +678,48 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
             [](const NativeICMP6Info& self) { return py::bytes(self.rest_data); },
             [](NativeICMP6Info& self, const std::string& v) { self.rest_data = v; });
 
+    py::class_<NativeGREInfo>(m, "NativeGREInfo")
+        .def(py::init<>())
+        .def_readwrite("flags", &NativeGREInfo::flags)
+        .def_readwrite("protocol_type", &NativeGREInfo::protocol_type)
+        .def_readwrite("checksum", &NativeGREInfo::checksum)
+        .def_readwrite("key", &NativeGREInfo::key)
+        .def_readwrite("sequence", &NativeGREInfo::sequence)
+        .def_readwrite("has_checksum", &NativeGREInfo::has_checksum)
+        .def_readwrite("has_key", &NativeGREInfo::has_key)
+        .def_readwrite("has_sequence", &NativeGREInfo::has_sequence);
+
+    py::class_<NativeVXLANInfo>(m, "NativeVXLANInfo")
+        .def(py::init<>())
+        .def_readwrite("flags", &NativeVXLANInfo::flags)
+        .def_readwrite("vni", &NativeVXLANInfo::vni);
+
+    py::class_<NativeMPLSInfo>(m, "NativeMPLSInfo")
+        .def(py::init<>())
+        .def_readwrite("label", &NativeMPLSInfo::label)
+        .def_readwrite("tc", &NativeMPLSInfo::tc)
+        .def_readwrite("ttl", &NativeMPLSInfo::ttl)
+        .def_readwrite("stack_depth", &NativeMPLSInfo::stack_depth)
+        .def_readwrite("bottom_of_stack", &NativeMPLSInfo::bottom_of_stack);
+
+    py::class_<NativeDHCPInfo>(m, "NativeDHCPInfo")
+        .def(py::init<>())
+        .def_readwrite("op", &NativeDHCPInfo::op)
+        .def_readwrite("htype", &NativeDHCPInfo::htype)
+        .def_readwrite("xid", &NativeDHCPInfo::xid)
+        .def_readwrite("ciaddr", &NativeDHCPInfo::ciaddr)
+        .def_readwrite("yiaddr", &NativeDHCPInfo::yiaddr)
+        .def_readwrite("siaddr", &NativeDHCPInfo::siaddr)
+        .def_readwrite("giaddr", &NativeDHCPInfo::giaddr)
+        .def_readwrite("chaddr", &NativeDHCPInfo::chaddr)
+        .def_readwrite("options_raw", &NativeDHCPInfo::options_raw);
+
+    py::class_<NativeDHCPv6Info>(m, "NativeDHCPv6Info")
+        .def(py::init<>())
+        .def_readwrite("msg_type", &NativeDHCPv6Info::msg_type)
+        .def_readwrite("transaction_id", &NativeDHCPv6Info::transaction_id)
+        .def_readwrite("options_raw", &NativeDHCPv6Info::options_raw);
+
     py::class_<NativeParsedPacket>(m, "NativeParsedPacket")
         .def(py::init<>())
         .def_readwrite("timestamp", &NativeParsedPacket::timestamp)
@@ -791,7 +876,8 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def("parse_packet", &NativeParser::parse_packet,
              py::arg("buf"), py::arg("link_type"), py::arg("save_raw_bytes") = false)
         .def("parse_packet_struct", &NativeParser::parse_packet_struct,
-             py::arg("buf"), py::arg("link_type"), py::arg("save_raw_bytes") = false)
+             py::arg("buf"), py::arg("link_type"), py::arg("save_raw_bytes") = false,
+             py::arg("app_layer_mode") = 0)
         .def("parse_tls_record", &NativeParser::parse_tls_record,
              py::arg("buf"))
         .def("load_extra_file", &NativeParser::load_extra_file,
@@ -800,12 +886,14 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
              py::arg("parent_proto"), py::arg("value"), py::arg("target_proto"))
         .def("parse_to_dataclass", [](NativeParser& self, py::bytes buf,
                                        uint32_t link_type, bool save_raw_bytes,
-                                       double timestamp, int caplen, int wirelen) -> py::object {
+                                       double timestamp, int caplen, int wirelen,
+                                       int app_layer_mode) -> py::object {
             // Parse to C++ struct (fast, no dict/converter overhead)
-            NativeParsedPacket pkt = self.parse_packet_struct(buf, link_type, save_raw_bytes);
+            NativeParsedPacket pkt = self.parse_packet_struct(buf, link_type, save_raw_bytes, app_layer_mode);
             return build_dataclass_from_struct(pkt, buf, timestamp, link_type, caplen, wirelen);
         }, py::arg("buf"), py::arg("link_type"), py::arg("save_raw_bytes") = false,
-           py::arg("timestamp") = 0.0, py::arg("caplen") = 0, py::arg("wirelen") = 0);
+           py::arg("timestamp") = 0.0, py::arg("caplen") = 0, py::arg("wirelen") = 0,
+           py::arg("app_layer_mode") = 0);
 
     // ── NativeFilter ──
     py::class_<NativeFilter>(m, "NativeFilter")
@@ -841,24 +929,25 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         bool filter_can_raw;
         bool save_raw_bytes;
         bool opened;
+        int app_layer_mode;
 
         NativePipeline(const std::string& path, NativeParser& parser,
-                       NativeFilter* filt, bool save_raw)
+                       NativeFilter* filt, bool save_raw, int app_mode)
             : reader(path), engine(&parser.engine()), filter(filt),
               filter_can_raw(filt ? filt->can_match_raw() : false),
-              save_raw_bytes(save_raw), opened(false) {}
+              save_raw_bytes(save_raw), opened(false), app_layer_mode(app_mode) {}
     };
 
     py::class_<NativePipeline>(m, "NativePipeline")
         .def(py::init([](const std::string& path, NativeParser& parser,
-                         py::object filter_obj, bool save_raw_bytes) {
+                         py::object filter_obj, bool save_raw_bytes, int app_layer_mode) {
             NativeFilter* filt = nullptr;
             if (!filter_obj.is_none()) {
                 filt = filter_obj.cast<NativeFilter*>();
             }
-            return std::make_unique<NativePipeline>(path, parser, filt, save_raw_bytes);
+            return std::make_unique<NativePipeline>(path, parser, filt, save_raw_bytes, app_layer_mode);
         }), py::arg("path"), py::arg("parser"), py::arg("filter") = py::none(),
-            py::arg("save_raw_bytes") = false,
+            py::arg("save_raw_bytes") = false, py::arg("app_layer_mode") = 0,
             // Keep parser and filter alive while pipeline exists
             py::keep_alive<1, 3>(), py::keep_alive<1, 4>())
         .def("__enter__", [](NativePipeline& self) -> NativePipeline& {
@@ -892,7 +981,7 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
 
                 // Parse to C++ struct (zero-copy from mmap'd buffer)
                 NativeParsedPacket pkt = self.engine->parse_packet_struct(
-                    buf, len, pkt_link_type, self.save_raw_bytes);
+                    buf, len, pkt_link_type, self.save_raw_bytes, self.app_layer_mode);
 
                 // App-layer filter fallback (needs parsed fields)
                 if (self.filter && !self.filter_can_raw) {

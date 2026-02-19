@@ -11,7 +11,7 @@ from typing import Iterator
 class NativeEngine:
     """High-level wrapper around the C++ native engine components."""
 
-    def __init__(self, bpf_filter: str | None = None):
+    def __init__(self, bpf_filter: str | None = None, app_layer_mode: int = 0):
         from wa1kpcap.native import _wa1kpcap_native as _native
         if _native is None:
             raise RuntimeError(
@@ -19,6 +19,7 @@ class NativeEngine:
                 "Install with: pip install -e '.[native]'"
             )
         self._native = _native
+        self._app_layer_mode = app_layer_mode
 
         # Locate YAML protocol configs
         protocols_dir = str(Path(__file__).parent / "protocols")
@@ -60,7 +61,8 @@ class NativeEngine:
             ParsedPacket objects (Python dataclasses, fast attribute access)
         """
         pipeline = self._native.NativePipeline(
-            str(pcap_path), self._parser, self._filter, save_raw_bytes)
+            str(pcap_path), self._parser, self._filter, save_raw_bytes,
+            self._app_layer_mode)
         with pipeline:
             yield from pipeline
 

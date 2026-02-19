@@ -23,4 +23,9 @@
     X(ICMP6,    icmp6, NativeICMP6Info,    "ICMP6Info")    \
     X(VLAN,     vlan,  NativeVLANInfo,     "VLANInfo")     \
     X(SLL,      sll,   NativeSLLInfo,      "SLLInfo")      \
-    X(SLL2,     sll2,  NativeSLL2Info,     "SLL2Info")
+    X(SLL2,     sll2,  NativeSLL2Info,     "SLL2Info")     \
+    X(GRE,      gre,   NativeGREInfo,      "GREInfo")      \
+    X(VXLAN,    vxlan, NativeVXLANInfo,    "VXLANInfo")    \
+    X(MPLS,     mpls,  NativeMPLSInfo,     "MPLSInfo")     \
+    X(DHCP,     dhcp,  NativeDHCPInfo,     "DHCPInfo")     \
+    X(DHCPv6,   dhcpv6, NativeDHCPv6Info,  "DHCPv6Info")

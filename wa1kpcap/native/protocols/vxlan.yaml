@@ -1,0 +1,21 @@
+name: vxlan
+fields:
+  - name: flags
+    type: fixed
+    size: 1
+    format: uint
+  - name: reserved1
+    type: fixed
+    size: 3
+    format: uint
+  - name: vni_reserved
+    type: bitfield
+    group_size: 4
+    fields:
+      - name: vni
+        bits: 24
+      - name: reserved2
+        bits: 8
+
+next_protocol:
+  default: ethernet

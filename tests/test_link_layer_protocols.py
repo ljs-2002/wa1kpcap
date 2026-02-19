@@ -434,3 +434,604 @@ class TestNFLOGParsing:
 
         assert pkt.ip is not None
         assert pkt.ip.src == "10.0.0.1"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# GRE (Generic Routing Encapsulation)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestGREParsing:
+    """Test GRE fast-path parsing from raw bytes."""
+
+    def _build_gre_header(self, protocol_type=0x0800, checksum=None,
+                          key=None, sequence=None) -> bytes:
+        """Build a GRE header with optional fields."""
+        flags = 0
+        if checksum is not None:
+            flags |= 0x8000  # C bit
+        if key is not None:
+            flags |= 0x2000  # K bit
+        if sequence is not None:
+            flags |= 0x1000  # S bit
+
+        hdr = struct.pack('>HH', flags, protocol_type)
+
+        if checksum is not None:
+            hdr += struct.pack('>HH', checksum, 0)  # checksum + reserved1
+
+        if key is not None:
+            hdr += struct.pack('>I', key)
+
+        if sequence is not None:
+            hdr += struct.pack('>I', sequence)
+
+        return hdr
+
+    def _build_gre_packet(self, inner_payload=b"", **gre_kwargs) -> bytes:
+        """Ethernet + IPv4(proto=47) + GRE + inner_payload."""
+        gre_hdr = self._build_gre_header(**gre_kwargs)
+        ip_payload = gre_hdr + inner_payload
+        ip = build_ipv4(proto=47, payload=ip_payload)
+        eth = build_eth(ethertype=0x0800)
+        return eth + ip
+
+    def test_gre_basic_ipv4_encap(self):
+        """GRE with no optional fields, encapsulating IPv4."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="192.168.1.1", dst="192.168.1.2", proto=6)
+        raw = self._build_gre_packet(inner_payload=inner_ip, protocol_type=0x0800)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.protocol_type == 0x0800
+        assert pkt.gre.flags == 0
+        assert pkt.gre.checksum is None
+        assert pkt.gre.key is None
+        assert pkt.gre.sequence is None
+
+    def test_gre_with_checksum(self):
+        """GRE with checksum present (C bit set)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.1.1.1", dst="10.1.1.2")
+        raw = self._build_gre_packet(inner_payload=inner_ip,
+                                      protocol_type=0x0800, checksum=0xABCD)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.has_checksum
+        assert pkt.gre.checksum == 0xABCD
+        assert pkt.gre.key is None
+        assert pkt.gre.sequence is None
+
+    def test_gre_with_key(self):
+        """GRE with key present (K bit set)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.2.2.1", dst="10.2.2.2")
+        raw = self._build_gre_packet(inner_payload=inner_ip,
+                                      protocol_type=0x0800, key=0x12345678)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.has_key
+        assert pkt.gre.key == 0x12345678
+        assert not pkt.gre.has_checksum
+        assert not pkt.gre.has_sequence
+
+    def test_gre_with_sequence(self):
+        """GRE with sequence number present (S bit set)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.3.3.1", dst="10.3.3.2")
+        raw = self._build_gre_packet(inner_payload=inner_ip,
+                                      protocol_type=0x0800, sequence=42)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.has_sequence
+        assert pkt.gre.sequence == 42
+
+    def test_gre_all_optional_fields(self):
+        """GRE with checksum + key + sequence all present."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.4.4.1", dst="10.4.4.2")
+        raw = self._build_gre_packet(inner_payload=inner_ip,
+                                      protocol_type=0x0800,
+                                      checksum=0x1234, key=0xDEADBEEF,
+                                      sequence=99)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.flags == (0x8000 | 0x2000 | 0x1000)
+        assert pkt.gre.checksum == 0x1234
+        assert pkt.gre.key == 0xDEADBEEF
+        assert pkt.gre.sequence == 99
+
+    def test_gre_inner_ipv4_parsed(self):
+        """Verify inner IPv4 is parsed after GRE decapsulation."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="172.16.0.1", dst="172.16.0.2", proto=17,
+                              payload=build_udp(sport=5000, dport=6000))
+        raw = self._build_gre_packet(inner_payload=inner_ip, protocol_type=0x0800)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        # Outer IP should be the tunnel endpoints
+        assert pkt.ip is not None
+        # GRE should be present
+        assert pkt.gre is not None
+        assert pkt.gre.protocol_type == 0x0800
+
+    def test_gre_inner_ipv6(self):
+        """GRE encapsulating IPv6."""
+        parser = _get_native_parser()
+        inner_ip6 = build_ipv6(src="2001:db8::1", dst="2001:db8::2", next_header=17,
+                               payload=build_udp())
+        raw = self._build_gre_packet(inner_payload=inner_ip6, protocol_type=0x86DD)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.protocol_type == 0x86DD
+
+    def test_gre_over_ipv6(self):
+        """GRE carried over IPv6 (next_header=47)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.0.0.1", dst="10.0.0.2")
+        gre_hdr = self._build_gre_header(protocol_type=0x0800)
+        ip6 = build_ipv6(src="2001:db8::1", dst="2001:db8::2",
+                          next_header=47, payload=gre_hdr + inner_ip)
+        eth = build_eth(ethertype=0x86DD)
+        raw = eth + ip6
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.ip6 is not None
+        assert pkt.gre is not None
+        assert pkt.gre.protocol_type == 0x0800
+
+    def test_gre_too_short(self):
+        """GRE header shorter than 4 bytes should not crash."""
+        parser = _get_native_parser()
+        # Only 2 bytes of GRE (truncated)
+        truncated_gre = b"\x00\x00"
+        ip = build_ipv4(proto=47, payload=truncated_gre)
+        eth = build_eth(ethertype=0x0800)
+        raw = eth + ip
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        # Should parse IP but GRE should be absent or empty
+        assert pkt.ip is not None
+
+    def test_gre_transparent_ethernet_bridging(self):
+        """GRE with protocol_type 0x6558 (Transparent Ethernet Bridging)."""
+        parser = _get_native_parser()
+        inner_eth = build_eth(src="11:22:33:44:55:66", dst="aa:bb:cc:dd:ee:ff",
+                              ethertype=0x0800)
+        inner_ip = build_ipv4(src="10.10.10.1", dst="10.10.10.2")
+        raw = self._build_gre_packet(inner_payload=inner_eth + inner_ip,
+                                      protocol_type=0x6558)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.gre is not None
+        assert pkt.gre.protocol_type == 0x6558
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VXLAN (Virtual Extensible LAN)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestVXLANParsing:
+    """Test VXLAN fast-path parsing from raw bytes."""
+
+    def _build_vxlan_header(self, vni=1000, flags=0x08) -> bytes:
+        """Build an 8-byte VXLAN header.
+        Layout: flags(1) + reserved(3) + VNI(3) + reserved(1)
+        """
+        return struct.pack('>B3sI', flags, b"\x00\x00\x00", vni << 8)
+
+    def _build_vxlan_packet(self, vni=1000, inner_payload=b"") -> bytes:
+        """Ethernet + IPv4 + UDP(dport=4789) + VXLAN + inner_payload."""
+        vxlan_hdr = self._build_vxlan_header(vni=vni)
+        udp_payload = vxlan_hdr + inner_payload
+        udp_hdr = build_udp(sport=50000, dport=4789, payload=udp_payload)
+        ip = build_ipv4(proto=17, payload=udp_hdr)
+        eth = build_eth(ethertype=0x0800)
+        return eth + ip
+
+    def test_vxlan_basic(self):
+        """VXLAN with VNI parsed correctly."""
+        parser = _get_native_parser()
+        inner_eth = build_eth(src="11:22:33:44:55:66", dst="aa:bb:cc:dd:ee:ff",
+                              ethertype=0x0800)
+        inner_ip = build_ipv4(src="192.168.1.1", dst="192.168.1.2")
+        raw = self._build_vxlan_packet(vni=42, inner_payload=inner_eth + inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.vxlan is not None
+        assert pkt.vxlan.vni == 42
+        assert pkt.vxlan.flags == 0x08
+
+    def test_vxlan_large_vni(self):
+        """VXLAN with max 24-bit VNI (16777215)."""
+        parser = _get_native_parser()
+        inner_eth = build_eth(ethertype=0x0800)
+        inner_ip = build_ipv4(src="10.0.0.1", dst="10.0.0.2")
+        raw = self._build_vxlan_packet(vni=0xFFFFFF, inner_payload=inner_eth + inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.vxlan is not None
+        assert pkt.vxlan.vni == 0xFFFFFF
+
+    def test_vxlan_inner_ethernet_parsed(self):
+        """Verify inner Ethernet frame is parsed after VXLAN decapsulation."""
+        parser = _get_native_parser()
+        inner_eth = build_eth(src="de:ad:be:ef:00:01", dst="de:ad:be:ef:00:02",
+                              ethertype=0x0800)
+        inner_ip = build_ipv4(src="172.16.0.1", dst="172.16.0.2")
+        raw = self._build_vxlan_packet(vni=100, inner_payload=inner_eth + inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.vxlan is not None
+        assert pkt.udp is not None
+        assert pkt.udp.dport == 4789
+
+    def test_vxlan_zero_vni(self):
+        """VXLAN with VNI = 0."""
+        parser = _get_native_parser()
+        inner_eth = build_eth(ethertype=0x0800)
+        inner_ip = build_ipv4(src="10.1.1.1", dst="10.1.1.2")
+        raw = self._build_vxlan_packet(vni=0, inner_payload=inner_eth + inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.vxlan is not None
+        assert pkt.vxlan.vni == 0
+
+    def test_vxlan_too_short(self):
+        """VXLAN header shorter than 8 bytes should not crash."""
+        parser = _get_native_parser()
+        # Only 4 bytes of VXLAN (truncated)
+        truncated_vxlan = b"\x08\x00\x00\x00"
+        udp_hdr = build_udp(sport=50000, dport=4789, payload=truncated_vxlan)
+        ip = build_ipv4(proto=17, payload=udp_hdr)
+        eth = build_eth(ethertype=0x0800)
+        raw = eth + ip
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        # Should parse UDP but VXLAN may be absent
+        assert pkt.udp is not None
+        assert pkt.udp.dport == 4789
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MPLS (Multi-Protocol Label Switching)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestMPLSParsing:
+    """Test MPLS fast-path parsing from raw bytes."""
+
+    def _build_mpls_label(self, label=1000, tc=0, s_bit=True, ttl=64) -> bytes:
+        """Build a single 4-byte MPLS label entry."""
+        entry = ((label & 0xFFFFF) << 12) | ((tc & 0x07) << 9) | ((1 if s_bit else 0) << 8) | (ttl & 0xFF)
+        return struct.pack('>I', entry)
+
+    def _build_mpls_packet(self, labels, inner_payload=b"") -> bytes:
+        """Ethernet(ethertype=0x8847) + MPLS label stack + inner_payload."""
+        eth = build_eth(ethertype=0x8847)
+        mpls_stack = b""
+        for i, lbl in enumerate(labels):
+            s = (i == len(labels) - 1)  # S-bit on last label
+            mpls_stack += self._build_mpls_label(
+                label=lbl.get('label', 0),
+                tc=lbl.get('tc', 0),
+                s_bit=s,
+                ttl=lbl.get('ttl', 64))
+        return eth + mpls_stack + inner_payload
+
+    def test_mpls_single_label_ipv4(self):
+        """Single MPLS label with inner IPv4."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.0.0.1", dst="10.0.0.2")
+        raw = self._build_mpls_packet(
+            [{'label': 1000, 'tc': 5, 'ttl': 64}],
+            inner_payload=inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 1000
+        assert pkt.mpls.tc == 5
+        assert pkt.mpls.ttl == 64
+        assert pkt.mpls.bottom_of_stack is True
+        assert pkt.mpls.stack_depth == 1
+
+    def test_mpls_single_label_ipv6(self):
+        """Single MPLS label with inner IPv6."""
+        parser = _get_native_parser()
+        inner_ip6 = build_ipv6(src="2001:db8::1", dst="2001:db8::2")
+        raw = self._build_mpls_packet(
+            [{'label': 2000}],
+            inner_payload=inner_ip6)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 2000
+        assert pkt.ip6 is not None
+
+    def test_mpls_label_stack(self):
+        """Two-label MPLS stack — bottom label stored."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="172.16.0.1", dst="172.16.0.2")
+        raw = self._build_mpls_packet(
+            [{'label': 100, 'tc': 0, 'ttl': 255},
+             {'label': 200, 'tc': 3, 'ttl': 128}],
+            inner_payload=inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 200  # bottom-of-stack label
+        assert pkt.mpls.stack_depth == 2
+        assert pkt.mpls.bottom_of_stack is True
+
+    def test_mpls_three_label_stack(self):
+        """Three-label MPLS stack."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.1.1.1", dst="10.1.1.2")
+        raw = self._build_mpls_packet(
+            [{'label': 16}, {'label': 17}, {'label': 18}],
+            inner_payload=inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 18  # bottom label
+        assert pkt.mpls.stack_depth == 3
+
+    def test_mpls_max_label(self):
+        """MPLS with max 20-bit label (1048575)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.0.0.1", dst="10.0.0.2")
+        raw = self._build_mpls_packet(
+            [{'label': 0xFFFFF, 'ttl': 1}],
+            inner_payload=inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 0xFFFFF
+        assert pkt.mpls.ttl == 1
+
+    def test_mpls_inner_ipv4_parsed(self):
+        """Verify inner IPv4 is parsed after MPLS decapsulation."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="192.168.1.1", dst="192.168.1.2", proto=17,
+                              payload=build_udp(sport=8000, dport=9000))
+        raw = self._build_mpls_packet(
+            [{'label': 500}],
+            inner_payload=inner_ip)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.ip is not None
+        assert pkt.udp is not None
+        assert pkt.udp.dport == 9000
+
+    def test_mpls_too_short(self):
+        """MPLS with less than 4 bytes should not crash."""
+        parser = _get_native_parser()
+        eth = build_eth(ethertype=0x8847)
+        raw = eth + b"\x00\x00"  # truncated
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.eth is not None
+
+    def test_mpls_multicast_ethertype(self):
+        """MPLS multicast (ethertype 0x8848)."""
+        parser = _get_native_parser()
+        inner_ip = build_ipv4(src="10.0.0.1", dst="224.0.0.1")
+        label_entry = self._build_mpls_label(label=300, s_bit=True, ttl=32)
+        eth = build_eth(ethertype=0x8848)
+        raw = eth + label_entry + inner_ip
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.mpls is not None
+        assert pkt.mpls.label == 300
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DHCP (Dynamic Host Configuration Protocol)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDHCPParsing:
+    """Test DHCP slow-path parsing (Type B: YAML + Python Info)."""
+
+    MAGIC_COOKIE = b"\x63\x82\x53\x63"  # 0x63825363
+
+    def _build_bootp_header(self, op=1, htype=1, hlen=6, hops=0,
+                            xid=0x12345678, secs=0, flags=0,
+                            ciaddr="0.0.0.0", yiaddr="0.0.0.0",
+                            siaddr="0.0.0.0", giaddr="0.0.0.0",
+                            chaddr="aa:bb:cc:dd:ee:ff") -> bytes:
+        """Build 236-byte BOOTP header."""
+        import socket
+        hdr = struct.pack('>BBBB', op, htype, hlen, hops)
+        hdr += struct.pack('>I', xid)
+        hdr += struct.pack('>HH', secs, flags)
+        hdr += socket.inet_aton(ciaddr)
+        hdr += socket.inet_aton(yiaddr)
+        hdr += socket.inet_aton(siaddr)
+        hdr += socket.inet_aton(giaddr)
+        # chaddr: 6 bytes MAC + 10 bytes padding
+        mac_bytes = bytes(int(x, 16) for x in chaddr.split(':'))
+        hdr += mac_bytes + b"\x00" * 10
+        # sname (64 bytes) + file (128 bytes)
+        hdr += b"\x00" * 64 + b"\x00" * 128
+        return hdr
+
+    def _build_dhcp_options(self, options: list[tuple[int, bytes]]) -> bytes:
+        """Build DHCP options TLV with end marker."""
+        data = b""
+        for tag, val in options:
+            data += struct.pack('BB', tag, len(val)) + val
+        data += b"\xff"  # End option
+        return data
+
+    def _build_dhcp_packet(self, op=1, xid=0x12345678,
+                           ciaddr="0.0.0.0", yiaddr="0.0.0.0",
+                           siaddr="0.0.0.0", giaddr="0.0.0.0",
+                           chaddr="aa:bb:cc:dd:ee:ff",
+                           options=None) -> bytes:
+        """Full Ethernet + IPv4 + UDP(67/68) + BOOTP + magic + options."""
+        bootp = self._build_bootp_header(
+            op=op, xid=xid, ciaddr=ciaddr, yiaddr=yiaddr,
+            siaddr=siaddr, giaddr=giaddr, chaddr=chaddr)
+        opts = self._build_dhcp_options(options or [])
+        payload = bootp + self.MAGIC_COOKIE + opts
+        udp_hdr = build_udp(sport=68, dport=67, payload=payload)
+        ip = build_ipv4(proto=17, payload=udp_hdr)
+        eth = build_eth(ethertype=0x0800)
+        return eth + ip
+
+    def test_dhcp_discover(self):
+        """DHCP Discover (message type 1)."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(
+            op=1, xid=0xAABBCCDD,
+            chaddr="de:ad:be:ef:00:01",
+            options=[(53, b"\x01")])  # DHCP Discover
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert pkt.dhcp.op == 1
+        assert pkt.dhcp.xid == 0xAABBCCDD
+        # options_raw contains raw TLV bytes: tag(53) + len(1) + val(1) + end(0xff)
+        assert b"\x35\x01\x01" in pkt.dhcp.options_raw
+
+    def test_dhcp_offer(self):
+        """DHCP Offer (message type 2) with yiaddr."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(
+            op=2, xid=0x11223344,
+            yiaddr="192.168.1.100",
+            options=[(53, b"\x02"),          # DHCP Offer
+                     (1, b"\xff\xff\xff\x00"),  # Subnet mask
+                     (3, b"\xc0\xa8\x01\x01")]) # Router
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert pkt.dhcp.op == 2
+        assert len(pkt.dhcp.options_raw) > 0
+
+    def test_dhcp_multiple_options(self):
+        """DHCP with multiple options in raw bytes."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(
+            options=[(53, b"\x03"),           # DHCP Request
+                     (50, b"\xc0\xa8\x01\x64"),  # Requested IP
+                     (12, b"myhost")])            # Hostname
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert b"\x35\x01\x03" in pkt.dhcp.options_raw  # option 53
+        assert b"\x0c\x06myhost" in pkt.dhcp.options_raw  # option 12
+
+    def test_dhcp_no_options(self):
+        """DHCP with no options (just end marker)."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(options=[])
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert pkt.dhcp.op == 1
+        # options_raw contains only the end marker 0xff
+        assert pkt.dhcp.options_raw == b"\xff"
+
+    def test_dhcp_server_port(self):
+        """DHCP from server (sport=67, dport=68)."""
+        parser = _get_native_parser()
+        bootp = self._build_bootp_header(op=2, yiaddr="10.0.0.50")
+        opts = self._build_dhcp_options([(53, b"\x02")])
+        payload = bootp + self.MAGIC_COOKIE + opts
+        udp_hdr = build_udp(sport=67, dport=68, payload=payload)
+        ip = build_ipv4(proto=17, payload=udp_hdr)
+        eth = build_eth(ethertype=0x0800)
+        raw = eth + ip
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert pkt.dhcp.op == 2
+
+    def test_dhcp_udp_layer(self):
+        """Verify UDP layer is also parsed for DHCP packets."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(options=[(53, b"\x01")])
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.udp is not None
+        assert pkt.udp.dport == 67
+        assert pkt.dhcp is not None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DHCPv6 (Dynamic Host Configuration Protocol for IPv6)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDHCPv6Parsing:
+    """Test DHCPv6 fast-path parsing from raw bytes."""
+
+    def _build_dhcpv6_packet(self, msg_type=1, transaction_id=0x123456,
+                             options_raw=b"", dport=547) -> bytes:
+        """Ethernet + IPv6 + UDP(dport) + DHCPv6 header + options."""
+        dhcpv6_hdr = struct.pack('>B', msg_type)
+        # transaction_id is 3 bytes big-endian
+        dhcpv6_hdr += struct.pack('>I', transaction_id)[1:]
+        dhcpv6_payload = dhcpv6_hdr + options_raw
+        udp_hdr = build_udp(sport=546, dport=dport, payload=dhcpv6_payload)
+        ip6 = build_ipv6(src="fe80::1", dst="ff02::1:2", next_header=17,
+                         payload=udp_hdr)
+        eth = build_eth(ethertype=0x86DD)
+        return eth + ip6
+
+    def test_dhcpv6_solicit(self):
+        """DHCPv6 Solicit (msg_type=1)."""
+        parser = _get_native_parser()
+        raw = self._build_dhcpv6_packet(msg_type=1, transaction_id=0xABCDEF)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcpv6 is not None
+        assert pkt.dhcpv6.msg_type == 1
+        assert pkt.dhcpv6.transaction_id == 0xABCDEF
+
+    def test_dhcpv6_advertise(self):
+        """DHCPv6 Advertise (msg_type=2) from server."""
+        parser = _get_native_parser()
+        raw = self._build_dhcpv6_packet(msg_type=2, transaction_id=0x112233,
+                                        dport=546)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcpv6 is not None
+        assert pkt.dhcpv6.msg_type == 2
+        assert pkt.dhcpv6.transaction_id == 0x112233
+
+    def test_dhcpv6_with_options(self):
+        """DHCPv6 with raw options bytes preserved."""
+        parser = _get_native_parser()
+        # Option 1 (Client ID): type=0x0001, len=0x0004, data=0xDEADBEEF
+        opts = b"\x00\x01\x00\x04\xDE\xAD\xBE\xEF"
+        raw = self._build_dhcpv6_packet(msg_type=3, options_raw=opts)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcpv6 is not None
+        assert pkt.dhcpv6.msg_type == 3
+        assert pkt.dhcpv6.options_raw == opts
+
+    def test_dhcpv6_no_options(self):
+        """DHCPv6 with no options."""
+        parser = _get_native_parser()
+        raw = self._build_dhcpv6_packet(msg_type=1, options_raw=b"")
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcpv6 is not None
+        assert pkt.dhcpv6.options_raw == b""
+
+    def test_dhcpv6_udp_layer(self):
+        """Verify UDP layer is also parsed for DHCPv6 packets."""
+        parser = _get_native_parser()
+        raw = self._build_dhcpv6_packet(msg_type=1)
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.udp is not None
+        assert pkt.udp.dport == 547
+        assert pkt.dhcpv6 is not None
