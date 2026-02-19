@@ -1,0 +1,68 @@
+name: dhcp
+fields:
+  - name: op
+    type: fixed
+    size: 1
+    format: uint
+  - name: htype
+    type: fixed
+    size: 1
+    format: uint
+  - name: hlen
+    type: fixed
+    size: 1
+    format: uint
+  - name: hops
+    type: fixed
+    size: 1
+    format: uint
+  - name: xid
+    type: fixed
+    size: 4
+    format: uint
+  - name: secs
+    type: fixed
+    size: 2
+    format: uint
+  - name: flags
+    type: fixed
+    size: 2
+    format: uint
+  - name: ciaddr
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: yiaddr
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: siaddr
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: giaddr
+    type: fixed
+    size: 4
+    format: ipv4
+  - name: chaddr
+    type: fixed
+    size: 6
+    format: mac
+  - name: chaddr_padding
+    type: fixed
+    size: 10
+    format: raw
+  - name: sname
+    type: fixed
+    size: 64
+    format: raw
+  - name: file
+    type: fixed
+    size: 128
+    format: raw
+  - name: magic_cookie
+    type: fixed
+    size: 4
+    format: uint
+  - name: options_raw
+    type: rest

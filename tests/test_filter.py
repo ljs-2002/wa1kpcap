@@ -424,7 +424,7 @@ class TestWa1kPcapBPFIntegration:
 
     def test_no_filter_allows_all(self):
         """Test that no filter allows all flows."""
-        analyzer = Wa1kPcap(verbose_mode=False)
+        analyzer = Wa1kPcap(verbose_mode=False, default_filter=None)
         assert analyzer._packet_filter is None
         flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
         assert len(flows) > 0

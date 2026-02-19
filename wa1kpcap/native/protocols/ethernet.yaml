@@ -20,3 +20,5 @@ next_protocol:
     0x86DD: ipv6
     0x0806: arp
     0x8100: vlan
+    0x8847: mpls
+    0x8848: mpls

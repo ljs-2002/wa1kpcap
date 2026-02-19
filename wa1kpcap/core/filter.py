@@ -225,6 +225,18 @@ class AppProtocolCondition(FilterCondition):
                 result = True
             if 'dns' in self.protocols and pkt.dns:
                 result = True
+            if 'dhcp' in self.protocols and pkt.dhcp:
+                result = True
+            if 'dhcpv6' in self.protocols and pkt.dhcpv6:
+                result = True
+            if 'vlan' in self.protocols and pkt.vlan:
+                result = True
+            if 'gre' in self.protocols and pkt.gre:
+                result = True
+            if 'vxlan' in self.protocols and pkt.vxlan:
+                result = True
+            if 'mpls' in self.protocols and pkt.mpls:
+                result = True
 
             return result != self.negate
 
@@ -272,6 +284,7 @@ class BPFCompiler:
         (r'\bor\b', 'OR'),
         (r'\bnot\b', 'NOT'),
         (r'\bicmpv6\b', 'ICMPV6'),
+        (r'\bdhcpv6\b', 'DHCPV6'),
         (r'\btcp\b', 'TCP'),
         (r'\budp\b', 'UDP'),
         (r'\bicmp\b', 'ICMP'),
@@ -285,6 +298,11 @@ class BPFCompiler:
         (r'\btls\b', 'TLS'),
         (r'\bhttp\b', 'HTTP'),
         (r'\bdns\b', 'DNS'),
+        (r'\bdhcp\b', 'DHCP'),
+        (r'\bvxlan\b', 'VXLAN'),
+        (r'\bvlan\b', 'VLAN'),
+        (r'\bgre\b', 'GRE'),
+        (r'\bmpls\b', 'MPLS'),
         (r'\d+\.\d+\.\d+\.\d+', 'IPV4_ADDR'),
         (r'\d+', 'NUMBER'),
         (r'\s+', 'WS'),
@@ -459,6 +477,24 @@ class BPFCompiler:
         if tok_type == 'DNS':
             self._consume()
             return AppProtocolCondition(protocols={'dns'})
+        if tok_type == 'DHCP':
+            self._consume()
+            return AppProtocolCondition(protocols={'dhcp'})
+        if tok_type == 'DHCPV6':
+            self._consume()
+            return AppProtocolCondition(protocols={'dhcpv6'})
+        if tok_type == 'VLAN':
+            self._consume()
+            return AppProtocolCondition(protocols={'vlan'})
+        if tok_type == 'GRE':
+            self._consume()
+            return AppProtocolCondition(protocols={'gre'})
+        if tok_type == 'VXLAN':
+            self._consume()
+            return AppProtocolCondition(protocols={'vxlan'})
+        if tok_type == 'MPLS':
+            self._consume()
+            return AppProtocolCondition(protocols={'mpls'})
 
         # host <ip>
         if tok_type == 'HOST':
@@ -923,6 +959,18 @@ def _compile_post_node(cond: FilterCondition) -> Callable[[Any], bool]:
             if 'http' in _protos and pkt.http:
                 result = True
             if 'dns' in _protos and pkt.dns:
+                result = True
+            if 'dhcp' in _protos and pkt.dhcp:
+                result = True
+            if 'dhcpv6' in _protos and pkt.dhcpv6:
+                result = True
+            if 'vlan' in _protos and pkt.vlan:
+                result = True
+            if 'gre' in _protos and pkt.gre:
+                result = True
+            if 'vxlan' in _protos and pkt.vxlan:
+                result = True
+            if 'mpls' in _protos and pkt.mpls:
                 result = True
             return result != _neg
         return _f

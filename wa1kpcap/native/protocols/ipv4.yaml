@@ -69,3 +69,4 @@ next_protocol:
     17: udp
     1: icmp
     58: icmpv6
+    47: gre

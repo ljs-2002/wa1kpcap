@@ -21,3 +21,8 @@ next_protocol:
   field: [dst_port, src_port]
   mapping:
     53: dns
+    4789: vxlan
+    67: dhcp
+    68: dhcp
+    546: dhcpv6
+    547: dhcpv6

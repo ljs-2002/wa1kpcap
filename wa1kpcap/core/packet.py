@@ -731,6 +731,140 @@ class SLL2Info(_SlottedInfoBase):
             self._raw = _raw
 
 
+class GREInfo(_SlottedInfoBase):
+    """GRE (Generic Routing Encapsulation) information."""
+    __slots__ = ('flags', 'protocol_type', 'checksum', 'key', 'sequence', '_raw')
+    _SLOT_NAMES = ('flags', 'protocol_type', 'checksum', 'key', 'sequence', '_raw')
+    _SLOT_DEFAULTS = (0, 0, None, None, None, b'')
+
+    def __init__(self, flags=0, protocol_type=0, checksum=None, key=None,
+                 sequence=None, _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.flags = fields.get('flags', 0)
+            self.protocol_type = fields.get('protocol_type', 0)
+            self.checksum = fields.get('checksum')
+            self.key = fields.get('key')
+            self.sequence = fields.get('sequence')
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.flags = flags
+            self.protocol_type = protocol_type
+            self.checksum = checksum
+            self.key = key
+            self.sequence = sequence
+            self._raw = _raw
+
+    @property
+    def has_checksum(self) -> bool:
+        return self.checksum is not None
+
+    @property
+    def has_key(self) -> bool:
+        return self.key is not None
+
+    @property
+    def has_sequence(self) -> bool:
+        return self.sequence is not None
+
+
+class VXLANInfo(_SlottedInfoBase):
+    """VXLAN (Virtual Extensible LAN) information."""
+    __slots__ = ('flags', 'vni', '_raw')
+    _SLOT_NAMES = ('flags', 'vni', '_raw')
+    _SLOT_DEFAULTS = (0, 0, b'')
+
+    def __init__(self, flags=0, vni=0, _raw=b"",
+                 fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.flags = fields.get('flags', 0)
+            self.vni = fields.get('vni', 0)
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.flags = flags
+            self.vni = vni
+            self._raw = _raw
+
+
+class MPLSInfo(_SlottedInfoBase):
+    """MPLS (Multi-Protocol Label Switching) information."""
+    __slots__ = ('label', 'tc', 'ttl', 'stack_depth', 'bottom_of_stack', '_raw')
+    _SLOT_NAMES = ('label', 'tc', 'ttl', 'stack_depth', 'bottom_of_stack', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, 0, False, b'')
+
+    def __init__(self, label=0, tc=0, ttl=0, stack_depth=0,
+                 bottom_of_stack=False, _raw=b"",
+                 fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.label = fields.get('label', 0)
+            self.tc = fields.get('tc', 0)
+            self.ttl = fields.get('ttl', 0)
+            self.stack_depth = fields.get('stack_depth', 0)
+            self.bottom_of_stack = fields.get('bottom_of_stack', False)
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.label = label
+            self.tc = tc
+            self.ttl = ttl
+            self.stack_depth = stack_depth
+            self.bottom_of_stack = bottom_of_stack
+            self._raw = _raw
+
+
+class DHCPInfo(_SlottedInfoBase):
+    """DHCP (Dynamic Host Configuration Protocol) information."""
+    __slots__ = ('op', 'htype', 'xid', 'ciaddr', 'yiaddr', 'siaddr',
+                 'giaddr', 'chaddr', 'options_raw', '_raw')
+    _SLOT_NAMES = ('op', 'htype', 'xid', 'ciaddr', 'yiaddr', 'siaddr',
+                   'giaddr', 'chaddr', 'options_raw', '_raw')
+    _SLOT_DEFAULTS = (0, 0, 0, '', '', '', '', '', b'', b'')
+
+    def __init__(self, op=0, htype=0, xid=0, ciaddr='', yiaddr='',
+                 siaddr='', giaddr='', chaddr='', options_raw=b'',
+                 _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.op = fields.get('op', 0)
+            self.htype = fields.get('htype', 0)
+            self.xid = fields.get('xid', 0)
+            self.ciaddr = fields.get('ciaddr', '')
+            self.yiaddr = fields.get('yiaddr', '')
+            self.siaddr = fields.get('siaddr', '')
+            self.giaddr = fields.get('giaddr', '')
+            self.chaddr = fields.get('chaddr', '')
+            self.options_raw = fields.get('options_raw', b'')
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.op = op
+            self.htype = htype
+            self.xid = xid
+            self.ciaddr = ciaddr
+            self.yiaddr = yiaddr
+            self.siaddr = siaddr
+            self.giaddr = giaddr
+            self.chaddr = chaddr
+            self.options_raw = options_raw
+            self._raw = _raw
+
+
+class DHCPv6Info(_SlottedInfoBase):
+    """DHCPv6 (Dynamic Host Configuration Protocol for IPv6) information."""
+    __slots__ = ('msg_type', 'transaction_id', 'options_raw', '_raw')
+    _SLOT_NAMES = ('msg_type', 'transaction_id', 'options_raw', '_raw')
+    _SLOT_DEFAULTS = (0, 0, b'', b'')
+
+    def __init__(self, msg_type=0, transaction_id=0, options_raw=b'',
+                 _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.msg_type = fields.get('msg_type', 0)
+            self.transaction_id = fields.get('transaction_id', 0)
+            self.options_raw = fields.get('options_raw', b'')
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.msg_type = msg_type
+            self.transaction_id = transaction_id
+            self.options_raw = options_raw
+            self._raw = _raw
+
+
 # Map from short property names to layer registry names
 _PROTO_KEY_TO_LAYER = {
     'eth': 'ethernet', 'ip': 'ipv4', 'ip6': 'ipv6',
@@ -738,6 +872,7 @@ _PROTO_KEY_TO_LAYER = {
     'tls': 'tls_record', 'http': 'http', 'dns': 'dns',
     'arp': 'arp', 'icmp6': 'icmpv6',
     'vlan': 'vlan', 'sll': 'linux_sll', 'sll2': 'linux_sll2',
+    'gre': 'gre', 'vxlan': 'vxlan', 'mpls': 'mpls', 'dhcp': 'dhcp', 'dhcpv6': 'dhcpv6',
 }
 
 
@@ -765,7 +900,8 @@ class ParsedPacket:
                  _raw_eth=None, _raw_ip=None, _raw_transport=None, _raw_app=None,
                  _raw_tcp_payload=b"", _flow_key_cache=None, extra_layers=None,
                  arp=None, icmp6=None,
-                 vlan=None, sll=None, sll2=None):
+                 vlan=None, sll=None, sll2=None, gre=None, vxlan=None, mpls=None,
+                 dhcp=None, dhcpv6=None):
         self.timestamp = timestamp
         self.raw_data = raw_data
         self.link_layer_type = link_layer_type
@@ -790,7 +926,9 @@ class ParsedPacket:
                          ('tcp', tcp), ('udp', udp), ('icmp', icmp),
                          ('tls', tls), ('http', http), ('dns', dns),
                          ('arp', arp), ('icmp6', icmp6),
-                         ('vlan', vlan), ('sll', sll), ('sll2', sll2)):
+                         ('vlan', vlan), ('sll', sll), ('sll2', sll2),
+                         ('gre', gre), ('vxlan', vxlan), ('mpls', mpls),
+                         ('dhcp', dhcp), ('dhcpv6', dhcpv6)):
             if val is not None:
                 self.layers[_PROTO_KEY_TO_LAYER[key]] = val
 
@@ -918,6 +1056,46 @@ class ParsedPacket:
         if v is not None: self.layers['linux_sll2'] = v
         else: self.layers.pop('linux_sll2', None)
 
+    @property
+    def gre(self) -> GREInfo | None:
+        return self.layers.get('gre')
+    @gre.setter
+    def gre(self, v):
+        if v is not None: self.layers['gre'] = v
+        else: self.layers.pop('gre', None)
+
+    @property
+    def vxlan(self) -> VXLANInfo | None:
+        return self.layers.get('vxlan')
+    @vxlan.setter
+    def vxlan(self, v):
+        if v is not None: self.layers['vxlan'] = v
+        else: self.layers.pop('vxlan', None)
+
+    @property
+    def mpls(self) -> MPLSInfo | None:
+        return self.layers.get('mpls')
+    @mpls.setter
+    def mpls(self, v):
+        if v is not None: self.layers['mpls'] = v
+        else: self.layers.pop('mpls', None)
+
+    @property
+    def dhcp(self) -> DHCPInfo | None:
+        return self.layers.get('dhcp')
+    @dhcp.setter
+    def dhcp(self, v):
+        if v is not None: self.layers['dhcp'] = v
+        else: self.layers.pop('dhcp', None)
+
+    @property
+    def dhcpv6(self) -> DHCPv6Info | None:
+        return self.layers.get('dhcpv6')
+    @dhcpv6.setter
+    def dhcpv6(self, v):
+        if v is not None: self.layers['dhcpv6'] = v
+        else: self.layers.pop('dhcpv6', None)
+
     def get_layer(self, name: str) -> ProtocolInfo | None:
         """Get a protocol layer by registry name."""
         return self.layers.get(name)
@@ -1011,3 +1189,8 @@ _registry.register('http', HTTPInfo)
 _registry.register('vlan', VLANInfo)
 _registry.register('linux_sll', SLLInfo)
 _registry.register('linux_sll2', SLL2Info)
+_registry.register('gre', GREInfo)
+_registry.register('vxlan', VXLANInfo)
+_registry.register('mpls', MPLSInfo)
+_registry.register('dhcp', DHCPInfo)
+_registry.register('dhcpv6', DHCPv6Info)

@@ -1,0 +1,14 @@
+name: mpls
+fields:
+  - name: label_entry
+    type: bitfield
+    group_size: 4
+    fields:
+      - name: label
+        bits: 20
+      - name: tc
+        bits: 3
+      - name: bottom_of_stack
+        bits: 1
+      - name: ttl
+        bits: 8

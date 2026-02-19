@@ -11,7 +11,7 @@ from wa1kpcap.core.packet import (
     ParsedPacket, EthernetInfo, IPInfo, IP6Info,
     TCPInfo, UDPInfo, DNSInfo, TLSInfo,
     ARPInfo, ICMPInfo, ICMP6Info,
-    VLANInfo, SLLInfo, SLL2Info,
+    VLANInfo, SLLInfo, SLL2Info, GREInfo, VXLANInfo, MPLSInfo, DHCPInfo, DHCPv6Info,
     ProtocolInfo, ProtocolRegistry,
 )
 
@@ -196,6 +196,60 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             addr=sll2.get("addr", ""),
         )
 
+    # ── GRE ──
+    gre = d.get("gre")
+    if gre and isinstance(gre, dict):
+        pkt.gre = GREInfo(
+            flags=gre.get("flags", 0),
+            protocol_type=gre.get("protocol_type", 0),
+            checksum=gre.get("checksum"),
+            key=gre.get("key"),
+            sequence=gre.get("sequence"),
+        )
+
+    # ── VXLAN ──
+    vxlan = d.get("vxlan")
+    if vxlan and isinstance(vxlan, dict):
+        pkt.vxlan = VXLANInfo(
+            flags=vxlan.get("flags", 0),
+            vni=vxlan.get("vni", 0),
+        )
+
+    # ── MPLS ──
+    mpls = d.get("mpls")
+    if mpls and isinstance(mpls, dict):
+        pkt.mpls = MPLSInfo(
+            label=mpls.get("label", 0),
+            tc=mpls.get("tc", 0),
+            ttl=mpls.get("ttl", 0),
+            stack_depth=mpls.get("stack_depth", 0),
+            bottom_of_stack=mpls.get("bottom_of_stack", False),
+        )
+
+    # ── DHCP ──
+    dhcp = d.get("dhcp")
+    if dhcp and isinstance(dhcp, dict):
+        pkt.dhcp = DHCPInfo(
+            op=dhcp.get("op", 0),
+            htype=dhcp.get("htype", 0),
+            xid=dhcp.get("xid", 0),
+            ciaddr=dhcp.get("ciaddr", ""),
+            yiaddr=dhcp.get("yiaddr", ""),
+            siaddr=dhcp.get("siaddr", ""),
+            giaddr=dhcp.get("giaddr", ""),
+            chaddr=dhcp.get("chaddr", ""),
+            options_raw=dhcp.get("options_raw", b""),
+        )
+
+    # ── DHCPv6 ──
+    dhcpv6 = d.get("dhcpv6")
+    if dhcpv6 and isinstance(dhcpv6, dict):
+        pkt.dhcpv6 = DHCPv6Info(
+            msg_type=dhcpv6.get("msg_type", 0),
+            transaction_id=dhcpv6.get("transaction_id", 0),
+            options_raw=dhcpv6.get("options_raw", b""),
+        )
+
     # ── TLS ──
     tls_record = d.get("tls_record")
     if tls_record and isinstance(tls_record, dict):
@@ -234,7 +288,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
     _KNOWN_KEYS = {
         'ethernet', 'ipv4', 'ipv6', 'tcp', 'udp', 'dns',
         'arp', 'icmp', 'icmpv6',
-        'vlan', 'linux_sll', 'linux_sll2',
+        'vlan', 'linux_sll', 'linux_sll2', 'gre', 'vxlan', 'mpls', 'dhcp', 'dhcpv6',
         'tls_record', 'tls_handshake', 'tls_client_hello',
         'tls_server_hello', 'tls_certificate', 'tls_stream',
         '_raw_tcp_payload', '_raw_data', '_link_type', 'app_len',

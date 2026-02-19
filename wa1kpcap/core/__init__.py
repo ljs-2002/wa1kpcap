@@ -19,6 +19,11 @@ from wa1kpcap.core.packet import (
     VLANInfo,
     SLLInfo,
     SLL2Info,
+    GREInfo,
+    VXLANInfo,
+    MPLSInfo,
+    DHCPInfo,
+    DHCPv6Info,
 )
 from wa1kpcap.core.reader import PcapReader, LinkLayerType
 
@@ -45,6 +50,11 @@ __all__ = [
     'VLANInfo',
     'SLLInfo',
     'SLL2Info',
+    'GREInfo',
+    'VXLANInfo',
+    'MPLSInfo',
+    'DHCPInfo',
+    'DHCPv6Info',
     'PcapReader',
     'LinkLayerType',
 ]

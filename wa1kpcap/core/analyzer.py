@@ -27,6 +27,15 @@ from wa1kpcap.reassembly.tls_record import TLSRecordReassembler
 from wa1kpcap.features.registry import BaseIncrementalFeature
 
 
+def _merge_filters(default_filter: str | None, bpf_filter: str | None) -> str | None:
+    """Combine default_filter and bpf_filter with AND logic."""
+    df = (default_filter or "").strip()
+    bf = (bpf_filter or "").strip()
+    if df and bf:
+        return f"({df}) and ({bf})"
+    return df or bf or None
+
+
 class Wa1kPcap:
     """
     Main entry point for PCAP analysis.
@@ -163,6 +172,7 @@ class Wa1kPcap:
         filter_rst: bool = False,
         filter_retrans: bool = True,
         bpf_filter: str | None = None,
+        default_filter: str | None = "not arp and not icmp and not icmpv6 and not dhcp and not dhcpv6",
 
         # Detailed mode
         verbose_mode: bool = False,
@@ -175,6 +185,7 @@ class Wa1kPcap:
         # Protocol parsing
         enable_reassembly: bool = True,
         protocols: list[str] | None = None,
+        app_layer_parsing: str = "full",
 
         # Engine selection: "dpkt" (default) or "native" (C++ engine)
         engine: str = "dpkt",
@@ -185,7 +196,6 @@ class Wa1kPcap:
         self.filter_ack = filter_ack
         self.filter_rst = filter_rst
         self.filter_retrans = filter_retrans
-        self.bpf_filter = bpf_filter
         self.verbose_mode = verbose_mode
         self.enabled_features = enabled_features
         self.save_raw_bytes = save_raw_bytes
@@ -193,8 +203,23 @@ class Wa1kPcap:
         self.enable_reassembly = enable_reassembly
         self.protocols = protocols
 
+        # app_layer_parsing: "full" (0), "port_only" (1), "none" (2)
+        _app_layer_modes = {"full": 0, "port_only": 1, "none": 2}
+        if app_layer_parsing not in _app_layer_modes:
+            raise ValueError(
+                f"Invalid app_layer_parsing={app_layer_parsing!r}, "
+                f"must be one of: {', '.join(_app_layer_modes)}"
+            )
+        self.app_layer_parsing = app_layer_parsing
+        self._app_layer_mode = _app_layer_modes[app_layer_parsing]
+
+        # Merge default_filter and bpf_filter
+        self.default_filter = default_filter
+        self.bpf_filter = bpf_filter
+        effective_filter = _merge_filters(default_filter, bpf_filter)
+
         # Initialize BPF filter
-        self._packet_filter = PacketFilter(bpf_filter) if bpf_filter else None
+        self._packet_filter = PacketFilter(effective_filter) if effective_filter else None
 
         # Initialize components
         self._flow_manager = FlowManager(FlowManagerConfig(
@@ -231,7 +256,10 @@ class Wa1kPcap:
                     "Install with: pip install -e '.[native]'"
                 )
             from wa1kpcap.native.engine import NativeEngine
-            self._native_engine = NativeEngine(bpf_filter=bpf_filter)
+            self._native_engine = NativeEngine(
+                bpf_filter=effective_filter,
+                app_layer_mode=self._app_layer_mode,
+            )
 
         # Statistics
         self._stats = {
@@ -686,7 +714,8 @@ class Wa1kPcap:
             pkt._raw_tcp_payload = udp.data    # reuse field for app payload
 
             if udp.sport == 53 or udp.dport == 53:
-                self._parse_dns(udp.data, pkt)
+                if self._app_layer_mode == 0:  # full only
+                    self._parse_dns(udp.data, pkt)
 
         elif proto == 6 or proto == 17:
             # Fallback: transport is raw bytes (dpkt failed to parse)
@@ -706,19 +735,24 @@ class Wa1kPcap:
                     pkt.app_len = len(udp.data)
                     pkt._raw_tcp_payload = udp.data
                     if udp.sport == 53 or udp.dport == 53:
-                        self._parse_dns(udp.data, pkt)
+                        if self._app_layer_mode == 0:  # full only
+                            self._parse_dns(udp.data, pkt)
             except Exception:
                 pass
 
     def _parse_application(self, data: bytes, pkt: ParsedPacket) -> None:
         """Parse application layer protocols."""
-        if not data:
+        if not data or self._app_layer_mode >= 2:  # none: skip all
             return
 
         # Check for TLS (port 443, 465, 993, 995)
         if pkt.tcp:
             port = pkt.tcp.dport if pkt.tcp else 0
             sport = pkt.tcp.sport if pkt.tcp else 0
+
+            # port_only (1) and above: skip TLS/HTTP (slow-path protocols)
+            if self._app_layer_mode >= 1:
+                return
 
             if port in (443, 465, 993, 995) or sport in (443, 465, 993, 995):
                 self._parse_tls(data, pkt)
@@ -969,6 +1003,10 @@ class Wa1kPcap:
             pkt: Parsed packet with TCP layer
             flow: Flow object (already created)
         """
+        # app_layer_mode >= 2 (none): skip all post-transport parsing
+        if self._app_layer_mode >= 2:
+            return
+
         tcp_data = getattr(pkt, '_raw_tcp_payload', b'')
         if not tcp_data and not pkt.tcp:
             return
@@ -976,6 +1014,9 @@ class Wa1kPcap:
         # Native engine: handle TLS reassembly in Python, parse via C++ engine.
         if self._engine == "native":
             if tcp_data and pkt.tcp:
+                # app_layer_mode >= 1 (port_only): skip TLS/HTTP (slow-path)
+                if self._app_layer_mode >= 1:
+                    return
                 port = pkt.tcp.dport
                 sport = pkt.tcp.sport
                 is_tls_port = port in (443, 465, 993, 995, 5061) or sport in (443, 465, 993, 995, 5061)
@@ -1008,7 +1049,7 @@ class Wa1kPcap:
 
         # Parse application layer protocols using the new parse_tls approach
         # This handles TLS record reassembly internally via data buffering
-        if tcp_data:
+        if tcp_data and self._app_layer_mode == 0:  # full only
             self._parse_application_with_buffering(tcp_data, pkt, flow, direction)
 
     def _handle_native_tls_reassembly(

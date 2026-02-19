@@ -97,6 +97,12 @@ bool AppProtocolFilterNode::matches(const py::dict& parsed) const {
     if (protocols.count("tls")) result = result || parsed.contains("tls_record");
     if (protocols.count("http")) result = result || parsed.contains("http");
     if (protocols.count("dns")) result = result || parsed.contains("dns");
+    if (protocols.count("dhcp")) result = result || parsed.contains("dhcp");
+    if (protocols.count("dhcpv6")) result = result || parsed.contains("dhcpv6");
+    if (protocols.count("vlan")) result = result || parsed.contains("vlan");
+    if (protocols.count("gre")) result = result || parsed.contains("gre");
+    if (protocols.count("vxlan")) result = result || parsed.contains("vxlan");
+    if (protocols.count("mpls")) result = result || parsed.contains("mpls");
     return result != negate;
 }
 
@@ -157,6 +163,12 @@ std::vector<NativeFilter::Token> NativeFilter::tokenize(const std::string& s) {
             else if (word == "tls") tokens.push_back({TokenType::TLS, word});
             else if (word == "http") tokens.push_back({TokenType::HTTP, word});
             else if (word == "dns") tokens.push_back({TokenType::DNS, word});
+            else if (word == "dhcpv6") tokens.push_back({TokenType::DHCPV6, word});
+            else if (word == "dhcp") tokens.push_back({TokenType::DHCP, word});
+            else if (word == "vxlan") tokens.push_back({TokenType::VXLAN, word});
+            else if (word == "vlan") tokens.push_back({TokenType::VLAN, word});
+            else if (word == "gre") tokens.push_back({TokenType::GRE, word});
+            else if (word == "mpls") tokens.push_back({TokenType::MPLS, word});
             else throw std::runtime_error("Unknown keyword: " + word);
             continue;
         }
@@ -350,6 +362,42 @@ std::unique_ptr<FilterNode> NativeFilter::parse_atom() {
         consume();
         auto n = std::make_unique<AppProtocolFilterNode>();
         n->protocols.insert("dns");
+        return n;
+    }
+    case TokenType::DHCP: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("dhcp");
+        return n;
+    }
+    case TokenType::DHCPV6: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("dhcpv6");
+        return n;
+    }
+    case TokenType::VLAN: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("vlan");
+        return n;
+    }
+    case TokenType::GRE: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("gre");
+        return n;
+    }
+    case TokenType::VXLAN: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("vxlan");
+        return n;
+    }
+    case TokenType::MPLS: {
+        consume();
+        auto n = std::make_unique<AppProtocolFilterNode>();
+        n->protocols.insert("mpls");
         return n;
     }
     case TokenType::HOST: {
@@ -648,9 +696,63 @@ bool PortFilterNode::matches_raw(const RawPacketFields& raw) const {
     return result != negate;
 }
 
-bool AppProtocolFilterNode::matches_raw(const RawPacketFields& /*raw*/) const {
-    // Cannot determine app-layer protocol from raw bytes
-    // Return true to pass through (caller should fall back to full parse)
+bool AppProtocolFilterNode::matches_raw(const RawPacketFields& raw) const {
+    // Port-matchable protocols can be checked on raw bytes
+    bool result = false;
+
+    if (protocols.count("dhcp")) {
+        // DHCP = UDP (proto 17) port 67 or 68
+        if (raw.has_ip && raw.ip_proto == 17 && raw.has_transport) {
+            result = result || raw.src_port == 67 || raw.dst_port == 67
+                            || raw.src_port == 68 || raw.dst_port == 68;
+        }
+    }
+    if (protocols.count("dhcpv6")) {
+        // DHCPv6 = UDP (proto 17) port 546 or 547
+        if (raw.has_ip && raw.ip_proto == 17 && raw.has_transport) {
+            result = result || raw.src_port == 546 || raw.dst_port == 546
+                            || raw.src_port == 547 || raw.dst_port == 547;
+        }
+    }
+    if (protocols.count("vlan")) {
+        // VLAN: ethertype 0x8100 — check is_arp field repurpose won't work,
+        // but we can't detect VLAN from RawPacketFields. Fall through.
+    }
+    if (protocols.count("gre")) {
+        // GRE = IP proto 47
+        if (raw.has_ip) {
+            result = result || raw.ip_proto == 47;
+        }
+    }
+    if (protocols.count("vxlan")) {
+        // VXLAN = UDP (proto 17) port 4789
+        if (raw.has_ip && raw.ip_proto == 17 && raw.has_transport) {
+            result = result || raw.src_port == 4789 || raw.dst_port == 4789;
+        }
+    }
+    if (protocols.count("mpls")) {
+        // MPLS: ethertype 0x8847/0x8848 — can't detect from RawPacketFields
+    }
+
+    // For truly app-layer protocols (tls, http, dns), return true to pass through
+    static const std::set<std::string> raw_matchable = {
+        "dhcp", "dhcpv6", "gre", "vxlan"
+    };
+    for (auto& p : protocols) {
+        if (!raw_matchable.count(p)) return true;  // can't filter, pass through
+    }
+
+    return result != negate;
+}
+
+bool AppProtocolFilterNode::can_match_raw() const {
+    // Only raw-matchable if ALL protocols in the set can be checked on raw bytes
+    static const std::set<std::string> raw_matchable = {
+        "dhcp", "dhcpv6", "gre", "vxlan"
+    };
+    for (auto& p : protocols) {
+        if (!raw_matchable.count(p)) return false;
+    }
     return true;
 }
 

@@ -76,11 +76,11 @@ struct PortFilterNode : FilterNode {
 };
 
 struct AppProtocolFilterNode : FilterNode {
-    std::set<std::string> protocols; // "tls", "http", "dns"
+    std::set<std::string> protocols; // "tls", "http", "dns", "dhcp", "dhcpv6", etc.
     bool negate = false;
     bool matches(const py::dict& parsed) const override;
     bool matches_raw(const RawPacketFields& raw) const override;
-    bool can_match_raw() const override { return false; }  // needs full parse
+    bool can_match_raw() const override;
 };
 
 struct CompoundFilterNode : FilterNode {
@@ -116,7 +116,7 @@ public:
         LPAREN, RPAREN, AND, OR, NOT,
         TCP, UDP, ICMP, ICMPV6, ARP, IP, IPV6,
         HOST, SRC, DST, PORT,
-        TLS, HTTP, DNS,
+        TLS, HTTP, DNS, DHCP, DHCPV6, VLAN, GRE, VXLAN, MPLS,
         IPV4_ADDR, NUMBER, END
     };
     struct Token {

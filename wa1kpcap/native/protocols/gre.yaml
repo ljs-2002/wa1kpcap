@@ -1,0 +1,33 @@
+name: gre
+fields:
+  - name: flags_ver
+    type: bitfield
+    group_size: 2
+    fields:
+      - name: checksum_present
+        bits: 1
+      - name: reserved1_bit
+        bits: 1
+      - name: key_present
+        bits: 1
+      - name: sequence_present
+        bits: 1
+      - name: reserved2
+        bits: 9
+      - name: version
+        bits: 3
+  - name: protocol_type
+    type: fixed
+    size: 2
+    format: uint
+  - name: flags
+    type: computed
+    expression: checksum_present * 32768 + reserved1_bit * 16384 + key_present * 8192 + sequence_present * 4096
+
+next_protocol:
+  field: protocol_type
+  mapping:
+    0x0800: ipv4
+    0x86DD: ipv6
+    0x6558: ethernet
+    0x0806: arp

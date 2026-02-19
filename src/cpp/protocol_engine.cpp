@@ -175,6 +175,21 @@ ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
     fast_dispatch_["linux_sll2"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
         return fast_parse_sll2(buf, len, pkt);
     };
+    fast_dispatch_["gre"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_gre(buf, len, pkt);
+    };
+    fast_dispatch_["vxlan"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_vxlan(buf, len, pkt);
+    };
+    fast_dispatch_["mpls"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_mpls(buf, len, pkt);
+    };
+    fast_dispatch_["dhcp"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_dhcp(buf, len, pkt);
+    };
+    fast_dispatch_["dhcpv6"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_dhcpv6(buf, len, pkt);
+    };
 
     // ── Populate slow-path fill dispatch table ──
     fill_dispatch_["ethernet"] = [this](SlowFillContext& ctx) {
@@ -225,6 +240,15 @@ ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
     };
     fill_dispatch_["linux_sll2"] = [this](SlowFillContext& ctx) {
         fill_sll2(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["gre"] = [this](SlowFillContext& ctx) {
+        fill_gre(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["vxlan"] = [this](SlowFillContext& ctx) {
+        fill_vxlan(ctx.pkt, ctx.fields);
+    };
+    fill_dispatch_["mpls"] = [this](SlowFillContext& ctx) {
+        fill_mpls(ctx.pkt, ctx.fields);
     };
     fill_dispatch_["tls_stream"] = [](SlowFillContext& ctx) {
         extract_tls_from_repeat_fields(ctx.fields, ctx.pkt);
@@ -1014,11 +1038,12 @@ py::dict NativeParser::parse_packet(py::bytes buf, uint32_t link_type, bool save
 }
 
 NativeParsedPacket NativeParser::parse_packet_struct(py::bytes buf, uint32_t link_type,
-                                                      bool save_raw_bytes) {
+                                                      bool save_raw_bytes,
+                                                      int app_layer_mode) {
     std::string data = buf;
     return engine_.parse_packet_struct(
         reinterpret_cast<const uint8_t*>(data.data()), data.size(),
-        link_type, save_raw_bytes);
+        link_type, save_raw_bytes, app_layer_mode);
 }
 
 void NativeParser::load_extra_file(const std::string& file_path) {
@@ -1340,6 +1365,8 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ethernet(
     case 0x86DD: next = "ipv6"; break;
     case 0x0806: next = "arp"; break;
     case 0x8100: next = "vlan"; break;
+    case 0x8847: next = "mpls"; break;
+    case 0x8848: next = "mpls"; break;
     }
     if (next.empty()) next = yaml_next_protocol_lookup("ethernet", ether_type);
     return {14, std::move(next)};
@@ -1393,6 +1420,7 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ipv4(
     case 17: next = "udp"; break;
     case 1:  next = "icmp"; break;
     case 58: next = "icmpv6"; break;
+    case 47: next = "gre"; break;
     }
     if (next.empty()) next = yaml_next_protocol_lookup("ipv4", ip.proto);
     return {bytes_consumed, std::move(next)};
@@ -1467,6 +1495,7 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_ipv6(
     case 17: next = "udp"; break;
     case 1:  next = "icmp"; break;
     case 58: next = "icmpv6"; break;
+    case 47: next = "gre"; break;
     }
     if (next.empty()) next = yaml_next_protocol_lookup("ipv6", next_header);
     return {offset, std::move(next)};
@@ -1557,10 +1586,19 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_udp(
     std::string next;
     switch (udp.dport) {
         case 53: next = "dns"; break;
+        case 4789: next = "vxlan"; break;
+        case 67: next = "dhcp"; break;
+        case 68: next = "dhcp"; break;
+        case 546: next = "dhcpv6"; break;
+        case 547: next = "dhcpv6"; break;
     }
     if (next.empty()) {
         switch (udp.sport) {
             case 53: next = "dns"; break;
+            case 67: next = "dhcp"; break;
+            case 68: next = "dhcp"; break;
+            case 546: next = "dhcpv6"; break;
+            case 547: next = "dhcpv6"; break;
         }
     }
     if (next.empty()) next = yaml_next_protocol_lookup("udp", udp.dport);
@@ -1644,6 +1682,8 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_vlan(
         case 0x86DD: next = "ipv6"; break;
         case 0x0806: next = "arp";  break;
         case 0x8100: next = "vlan"; break;  // Q-in-Q
+        case 0x8847: next = "mpls"; break;
+        case 0x8848: next = "mpls"; break;
     }
     if (next.empty()) next = yaml_next_protocol_lookup("vlan", v.ether_type);
     return {4, std::move(next)};
@@ -1755,11 +1795,227 @@ void ProtocolEngine::fill_sll2(NativeParsedPacket& pkt, const FieldMap& fm) cons
     }
 }
 
+// ── GRE (Generic Routing Encapsulation): 4+ bytes ──
+// RFC 2784 / RFC 2890
+// Flags: C (bit 15) = checksum present, K (bit 13) = key present, S (bit 12) = sequence present
+// Header: 2 bytes flags+version, 2 bytes protocol_type, then optional fields
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_gre(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 4) return {};
+    pkt.has_gre = true;
+    auto& g = pkt.gre;
+
+    uint16_t flags_ver = util::read_u16_be(buf);
+    g.flags = flags_ver;
+    g.protocol_type = util::read_u16_be(buf + 2);
+
+    bool c_bit = (flags_ver & 0x8000) != 0;  // bit 15: checksum
+    bool k_bit = (flags_ver & 0x2000) != 0;  // bit 13: key
+    bool s_bit = (flags_ver & 0x1000) != 0;  // bit 12: sequence
+
+    size_t offset = 4;
+
+    if (c_bit) {
+        if (offset + 4 > len) return {offset, ""};
+        g.checksum = util::read_u16_be(buf + offset);
+        g.has_checksum = true;
+        offset += 4;  // checksum (2) + reserved1 (2)
+    }
+    if (k_bit) {
+        if (offset + 4 > len) return {offset, ""};
+        g.key = util::read_u32_be(buf + offset);
+        g.has_key = true;
+        offset += 4;
+    }
+    if (s_bit) {
+        if (offset + 4 > len) return {offset, ""};
+        g.sequence = util::read_u32_be(buf + offset);
+        g.has_sequence = true;
+        offset += 4;
+    }
+
+    // Dispatch inner protocol by ether_type
+    std::string next;
+    switch (g.protocol_type) {
+    case 0x0800: next = "ipv4"; break;
+    case 0x86DD: next = "ipv6"; break;
+    case 0x6558: next = "ethernet"; break;  // Transparent Ethernet Bridging
+    case 0x0806: next = "arp"; break;
+    case 0x8847: next = "mpls"; break;
+    case 0x8848: next = "mpls"; break;
+    }
+    if (next.empty()) next = yaml_next_protocol_lookup("gre", g.protocol_type);
+    return {offset, std::move(next)};
+}
+
+// ── fill_gre: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_gre(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_gre = true;
+    auto& g = pkt.gre;
+    for (auto& [k, val] : fm) {
+        if (k == "flags")              g.flags = field_to_int(val);
+        else if (k == "protocol_type") g.protocol_type = field_to_int(val);
+        else if (k == "checksum")      { g.checksum = field_to_int(val); g.has_checksum = true; }
+        else if (k == "key")           { g.key = field_to_int(val); g.has_key = true; }
+        else if (k == "sequence")      { g.sequence = field_to_int(val); g.has_sequence = true; }
+    }
+}
+
+// ── VXLAN (Virtual Extensible LAN): 8 bytes ──
+// RFC 7348: flags (1) + reserved (3) + VNI (3) + reserved (1)
+// Always chains to ethernet for the inner frame
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_vxlan(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 8) return {};
+    pkt.has_vxlan = true;
+    auto& v = pkt.vxlan;
+
+    v.flags = buf[0];
+    // bytes [1..3] reserved
+    v.vni = (static_cast<int64_t>(buf[4]) << 16) |
+            (static_cast<int64_t>(buf[5]) << 8) |
+             static_cast<int64_t>(buf[6]);
+    // byte [7] reserved
+
+    return {8, "ethernet"};
+}
+
+// ── fill_vxlan: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_vxlan(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_vxlan = true;
+    auto& v = pkt.vxlan;
+    for (auto& [k, val] : fm) {
+        if (k == "flags")    v.flags = field_to_int(val);
+        else if (k == "vni") v.vni = field_to_int(val);
+    }
+}
+
+// ── MPLS (Multi-Protocol Label Switching): 4 bytes per label entry ──
+// Label stack: walk 4-byte entries until S-bit (bit 0 of byte 2) is set
+// Then peek version nibble of inner payload for IPv4/IPv6
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_mpls(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 4) return {};
+    pkt.has_mpls = true;
+    auto& m = pkt.mpls;
+
+    size_t offset = 0;
+    int depth = 0;
+
+    // Walk the label stack
+    while (offset + 4 <= len) {
+        uint32_t entry = util::read_u32_be(buf + offset);
+        depth++;
+
+        int64_t label = (entry >> 12) & 0xFFFFF;
+        int64_t tc    = (entry >> 9) & 0x07;
+        bool s_bit    = (entry >> 8) & 0x01;
+        int64_t ttl   = entry & 0xFF;
+
+        // Store bottom-of-stack entry fields
+        m.label = label;
+        m.tc = tc;
+        m.ttl = ttl;
+        m.bottom_of_stack = s_bit;
+
+        offset += 4;
+
+        if (s_bit) break;  // Bottom of stack reached
+    }
+
+    m.stack_depth = depth;
+
+    // Peek inner payload version nibble
+    std::string next;
+    if (offset < len) {
+        uint8_t version = (buf[offset] >> 4) & 0x0F;
+        if (version == 4) next = "ipv4";
+        else if (version == 6) next = "ipv6";
+        // Could also be ethernet (pseudowire), but version nibble check handles common cases
+    }
+
+    return {offset, std::move(next)};
+}
+
+// ── fill_mpls: slow-path fill from FieldMap ──
+
+void ProtocolEngine::fill_mpls(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_mpls = true;
+    auto& m = pkt.mpls;
+    for (auto& [k, val] : fm) {
+        if (k == "label")            m.label = field_to_int(val);
+        else if (k == "tc")          m.tc = field_to_int(val);
+        else if (k == "ttl")         m.ttl = field_to_int(val);
+        else if (k == "stack_depth") m.stack_depth = field_to_int(val);
+        else if (k == "bottom_of_stack") m.bottom_of_stack = (field_to_int(val) != 0);
+    }
+}
+
+// ── DHCP fast-path: 236-byte BOOTP header + 4-byte magic cookie + options_raw ──
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_dhcp(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    // Minimum: 236 (BOOTP) + 4 (magic cookie) = 240 bytes
+    if (len < 240) return {};
+    pkt.has_dhcp = true;
+    auto& d = pkt.dhcp;
+
+    d.op    = buf[0];
+    d.htype = buf[1];
+    // hlen = buf[2], hops = buf[3] — skipped
+    d.xid   = util::read_u32_be(buf + 4);
+    // secs = buf[8..9], flags = buf[10..11] — skipped
+
+    d.ciaddr = util::format_ipv4(buf + 12);
+    d.yiaddr = util::format_ipv4(buf + 16);
+    d.siaddr = util::format_ipv4(buf + 20);
+    d.giaddr = util::format_ipv4(buf + 24);
+    d.chaddr = util::format_mac(buf + 28);
+    // chaddr_padding(10) + sname(64) + file(128) = 202 bytes at offset 34
+    // magic_cookie at offset 236
+
+    // options_raw: everything after magic cookie
+    if (len > 240) {
+        d.options_raw.assign(buf + 240, buf + len);
+    }
+
+    return {len, ""};  // terminal protocol, no next
+}
+
+// ── DHCPv6 fast-path: 1-byte msg_type + 3-byte transaction_id + options_raw ──
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_dhcpv6(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 4) return {};
+    pkt.has_dhcpv6 = true;
+    auto& d = pkt.dhcpv6;
+
+    d.msg_type = buf[0];
+    d.transaction_id = (buf[1] << 16) | (buf[2] << 8) | buf[3];
+
+    if (len > 4) {
+        d.options_raw.assign(buf + 4, buf + len);
+    }
+
+    return {len, ""};  // terminal protocol, no next
+}
+
 // ── parse_packet_struct: parse full packet into C++ struct ──
 // ── parse_packet_struct: structured output path ──
 
 NativeParsedPacket ProtocolEngine::parse_packet_struct(
-    const uint8_t* buf, size_t len, uint32_t link_type, bool save_raw_bytes) const
+    const uint8_t* buf, size_t len, uint32_t link_type, bool save_raw_bytes,
+    int app_layer_mode) const
 {
     auto pkt_start = std::chrono::high_resolution_clock::now();
 
@@ -1780,7 +2036,17 @@ NativeParsedPacket ProtocolEngine::parse_packet_struct(
     bool has_tls = false;
     int64_t app_len_val = 0;
 
+    // app_layer_mode gate: applied after transport layer (tcp/udp) resolves next_protocol
+    // 0=full: no filtering
+    // 1=fast: only allow protocols with fast_dispatch_ entries
+    // 2=port_only: same as fast, plus suppress heuristic-detected protocols (tls_stream)
+    // 3=none: suppress all post-transport chaining
+    bool after_transport = false;
+
     while (!current_proto.empty() && remaining > 0 && max_layers-- > 0) {
+        // Track when we've just parsed a transport layer
+        bool is_transport = (current_proto == "tcp" || current_proto == "udp");
+
         // Fast path: table-driven dispatch into struct
         bool used_fast_path = false;
         auto fast_it = fast_dispatch_.find(current_proto);
@@ -1796,6 +2062,25 @@ NativeParsedPacket ProtocolEngine::parse_packet_struct(
                 }
                 cur += fr.bytes_consumed;
                 remaining -= fr.bytes_consumed;
+
+                // Apply app_layer_mode gate after transport layer
+                if (is_transport) after_transport = true;
+                if (after_transport && !fr.next_protocol.empty() && app_layer_mode > 0) {
+                    if (app_layer_mode == 2) {
+                        // none: stop all post-transport chaining
+                        fr.next_protocol.clear();
+                    } else if (app_layer_mode == 1) {
+                        // port_only: suppress heuristic + non-fast-dispatch protocols
+                        if (fr.next_protocol == "tls_stream") {
+                            fr.next_protocol.clear();
+                        }
+                        if (!fr.next_protocol.empty() &&
+                            fast_dispatch_.find(fr.next_protocol) == fast_dispatch_.end()) {
+                            fr.next_protocol.clear();
+                        }
+                    }
+                }
+
                 current_proto = std::move(fr.next_protocol);
                 continue;
             }
@@ -1847,6 +2132,23 @@ NativeParsedPacket ProtocolEngine::parse_packet_struct(
 
         cur += pr.bytes_consumed;
         remaining -= pr.bytes_consumed;
+
+        // Apply app_layer_mode gate after transport layer (slow path)
+        if (is_transport) after_transport = true;
+        if (after_transport && !pr.next_protocol.empty() && app_layer_mode > 0) {
+            if (app_layer_mode == 2) {
+                pr.next_protocol.clear();
+            } else if (app_layer_mode == 1) {
+                if (pr.next_protocol == "tls_stream") {
+                    pr.next_protocol.clear();
+                }
+                if (!pr.next_protocol.empty() &&
+                    fast_dispatch_.find(pr.next_protocol) == fast_dispatch_.end()) {
+                    pr.next_protocol.clear();
+                }
+            }
+        }
+
         current_proto = pr.next_protocol;
     }
 
