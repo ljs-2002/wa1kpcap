@@ -1,8 +1,8 @@
 # wa1kpcap Benchmark: dpkt vs native C++ engine
 
-- Date: 2026-02-19 00:43:35
+- Date: 2026-02-19 22:18:12
 - Python: 3.10.16
-- Mode: all
+- Mode: consistency
 - BPF filter: `tcp or udp`
 - Config: `filter_ack=False, verbose_mode=False`
 
@@ -580,52 +580,3 @@ Test file: `D:\MyProgram\wa1kpcap1\test\multi.pcap`
 | fe80::2513:2f98:52cb:ceab:5353 <-> ff02::fb:5353 (UDP) | 24 | 24 | 23/23 | Y | 0.000000 |
 | fe80::3c04:88ff:fec8:672c:48644 <-> ff02::fb:5353 (UDP) | 11 | 11 | 10/10 | Y | 0.000000 |
 | fe80::3c04:88ff:fec8:672c:60594 <-> ff02::fb:5353 (UDP) | 10 | 10 | 9/9 | Y | 0.000000 |
-
-## 2. Speed Benchmark
-
-### USTCTFC2016
-
-- Path: `D:\Project\Dataset\USTCTFC2016\ustc-tfc2016`
-- Files: 24
-- Total size: 3.716 GB
-
-| Metric | dpkt | native | flowcontainer |
-|--------|------|--------|---------------|
-| Total time | 348.81s | 189.24s | 316.51s |
-| Speed | 10.9 MB/s | 20.1 MB/s | 12.0 MB/s |
-| Speedup (vs dpkt) | 1.00x | 1.84x | 1.10x |
-
-#### Per-file results
-
-| File | Size (MB) | dpkt (s) | native (s) | fc (s) | native speedup | fc speedup |
-|------|-----------|----------|------------|--------|----------------|------------|
-| BitTorrent.pcap | 7.3 | 1.64 | 1.11 | 1.34 | 1.48x | 1.23x |
-| Facetime.pcap | 2.4 | 1.00 | 0.66 | 0.84 | 1.51x | 1.19x |
-| FTP.pcap | 60.2 | 30.54 | 17.24 | 22.44 | 1.77x | 1.36x |
-| Gmail.pcap | 9.1 | 2.26 | 1.32 | 1.91 | 1.71x | 1.19x |
-| MySQL.pcap | 22.4 | 16.76 | 11.12 | 15.44 | 1.51x | 1.09x |
-| Outlook.pcap | 11.2 | 1.45 | 1.02 | 1.19 | 1.42x | 1.21x |
-| Skype.pcap | 4.2 | 1.57 | 1.24 | 1.63 | 1.26x | 0.96x |
-| SMB-1.pcap | 1034.0 | 45.78 | 23.97 | 43.06 | 1.91x | 1.06x |
-| SMB-2.pcap | 206.8 | 8.76 | 4.83 | 8.72 | 1.81x | 1.01x |
-| Weibo-1.pcap | 1033.8 | 61.59 | 36.26 | 51.17 | 1.70x | 1.20x |
-| Weibo-2.pcap | 206.8 | 10.89 | 6.69 | 10.95 | 1.63x | 0.99x |
-| Weibo-3.pcap | 206.8 | 11.29 | 6.77 | 10.26 | 1.67x | 1.10x |
-| Weibo-4.pcap | 206.8 | 11.22 | 6.81 | 10.43 | 1.65x | 1.08x |
-| WorldOfWarcraft.pcap | 14.9 | 7.37 | 3.69 | 7.91 | 2.00x | 0.93x |
-| Cridex.pcap | 94.8 | 24.01 | 12.15 | 24.04 | 1.98x | 1.00x |
-| Geodo.pcap | 28.9 | 12.16 | 6.37 | 9.23 | 1.91x | 1.32x |
-| Htbot.pcap | 83.6 | 10.43 | 5.41 | 10.64 | 1.93x | 0.98x |
-| Miuref.pcap | 16.4 | 4.75 | 2.57 | 5.28 | 1.84x | 0.90x |
-| Neris.pcap | 90.1 | 27.71 | 13.12 | 24.32 | 2.11x | 1.14x |
-| Nsis-ay.pcap | 281.2 | 15.82 | 7.68 | 17.66 | 2.06x | 0.90x |
-| Shifu.pcap | 57.9 | 12.27 | 5.17 | 13.98 | 2.37x | 0.88x |
-| Tinba.pcap | 2.6 | 1.84 | 0.96 | 1.42 | 1.92x | 1.29x |
-| Virut.pcap | 109.3 | 22.95 | 10.77 | 18.92 | 2.13x | 1.21x |
-| Zeus.pcap | 13.4 | 4.76 | 2.31 | 3.72 | 2.06x | 1.28x |
-
-## 3. Summary
-
-| Dataset | Files | Size (GB) | dpkt (s) | native (s) | fc (s) | native speedup | fc speedup |
-|---------|-------|-----------|----------|------------|--------|----------------|------------|
-| USTCTFC2016 | 24 | 3.716 | 348.81 | 189.24 | 316.51 | 1.84x | 1.10x |

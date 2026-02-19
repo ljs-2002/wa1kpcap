@@ -54,7 +54,12 @@ def wa1kpcap_extract_flows(
     """Extract flows with wa1kpcap, return (flows, elapsed_seconds)."""
     from wa1kpcap import Wa1kPcap
 
-    kw = dict(filter_ack=False, verbose_mode=False, engine=engine)
+    kw = dict(
+        filter_ack=False,
+        verbose_mode=False,
+        engine=engine,
+        app_layer_parsing="port_only",
+    )
     if use_filter:
         kw["bpf_filter"] = BPF_FILTER
 
@@ -481,14 +486,16 @@ def benchmark_lite():
         gc.collect()
         flows, dt = wa1kpcap_extract_flows(str(pcap), engine="dpkt", use_filter=True)
         print(f"    dpkt   : {dt:.3f}s, {len(flows)} flows")
-        del flows; gc.collect()
+        del flows
+        gc.collect()
 
         # native
         flows, nt = wa1kpcap_extract_flows(str(pcap), engine="native", use_filter=True)
         print(f"    native : {nt:.3f}s, {len(flows)} flows")
         if dt > 0:
             print(f"    speedup: {dt / nt:.2f}x")
-        del flows; gc.collect()
+        del flows
+        gc.collect()
 
 
 # ============================================================
