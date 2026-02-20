@@ -6,8 +6,10 @@ on:
     paths-ignore:
       - '.github/workflows/**'
       - '*.md'
+      - '.gitignore'
       - 'LICENSE'
       - 'MANIFEST.in'
+      - 'CHANGELOG.md'
       - 'examples/**'
       - 'skills/**'
       - 'docs/**'
@@ -16,8 +18,10 @@ on:
     paths-ignore:
       - '.github/workflows/**'
       - '*.md'
+      - '.gitignore'
       - 'LICENSE'
       - 'MANIFEST.in'
+      - 'CHANGELOG.md'
       - 'examples/**'
       - 'skills/**'
       - 'docs/**'
