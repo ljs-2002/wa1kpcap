@@ -1,0 +1,62 @@
+# ============================================================
+# Complete YAML-Only Protocol Example: Syslog over UDP
+# ============================================================
+#
+# Syslog (RFC 5424) is a simple protocol carried over UDP port 514.
+# This example shows how to define a YAML-only protocol and wire
+# it into the parent protocol's dispatch.
+#
+# After adding this file, no recompilation is needed. The native
+# engine picks it up automatically.
+#
+# ── Step 1: Protocol YAML Definition ──────────────────────────
+#
+# File: wa1kpcap/native/protocols/syslog.yaml
+
+name: syslog
+fields:
+  - name: priority
+    type: fixed
+    size: 1
+    format: uint
+  - name: version
+    type: fixed
+    size: 1
+    format: uint
+  - name: message
+    type: rest
+    format: ascii
+
+# ── Step 2: Wire Parent Dispatch ──────────────────────────────
+#
+# Option A (recommended): Use ProtocolRegistry routing at runtime.
+# No YAML edits needed. Add this to your __init__.py:
+#
+#   from wa1kpcap.core.packet import ProtocolRegistry, ProtocolInfo
+#   ProtocolRegistry.get_instance().register(
+#       "syslog", ProtocolInfo,
+#       routing={"udp": {514: "syslog"}},
+#   )
+#
+# Option B: Edit wa1kpcap/native/protocols/udp.yaml directly:
+#
+#   next_protocol:
+#     field: [dst_port, src_port]
+#     mapping:
+#       53: dns
+#       514: syslog          # ← add this line
+#
+# ── Step 3: Test ──────────────────────────────────────────────
+#
+#   from wa1kpcap import Wa1kPcap
+#
+#   analyzer = Wa1kPcap(engine="native")
+#   flows = analyzer.analyze_file("syslog_capture.pcap")
+#
+#   for flow in flows:
+#       for pkt in flow.packets:
+#           layer = pkt.layers.get("syslog")
+#           if layer:
+#               print(f"Priority: {layer.fields['priority']}")
+#               print(f"Version:  {layer.fields['version']}")
+#               print(f"Message:  {layer.fields['message']}")

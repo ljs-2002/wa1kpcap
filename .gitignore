@@ -79,5 +79,4 @@ findings.md
 progress.md
 
 # Internal-only skills (keep locally, don't commit)
-.claude/skills/add-builtin-protocol/
-.claude/skills/protocol-guide/
+.claude/
