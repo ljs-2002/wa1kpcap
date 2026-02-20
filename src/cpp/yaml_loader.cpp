@@ -2,11 +2,36 @@
 #include "expression_eval.h"
 
 #include <yaml-cpp/yaml.h>
-#include <filesystem>
 #include <stdexcept>
 #include <algorithm>
 
-namespace fs = std::filesystem;
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
+
+// Portable path helpers (avoid std::filesystem for macOS < 10.15)
+#ifdef _WIN32
+static const char PATH_SEP = '\\';
+#else
+static const char PATH_SEP = '/';
+#endif
+
+static std::string path_stem(const std::string& path) {
+    // Extract filename without extension
+    auto pos = path.find_last_of("/\\");
+    std::string name = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    auto dot = name.rfind('.');
+    return (dot == std::string::npos) ? name : name.substr(0, dot);
+}
+
+static std::string path_extension(const std::string& path) {
+    auto pos = path.find_last_of("/\\");
+    std::string name = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    auto dot = name.rfind('.');
+    return (dot == std::string::npos) ? "" : name.substr(dot);
+}
 
 static PrimitiveType parse_primitive_type(const std::string& s) {
     if (s == "fixed")           return PrimitiveType::FIXED;
@@ -201,7 +226,7 @@ static LinkTypeConfig parse_link_types(const YAML::Node& root) {
 void YamlLoader::load_file(const std::string& file_path) {
     YAML::Node root = YAML::LoadFile(file_path);
 
-    std::string filename = fs::path(file_path).stem().string();
+    std::string filename = path_stem(file_path);
 
     if (filename == "link_types") {
         link_types_ = parse_link_types(root);
@@ -212,22 +237,45 @@ void YamlLoader::load_file(const std::string& file_path) {
 }
 
 void YamlLoader::load_directory(const std::string& dir_path) {
-    if (!fs::exists(dir_path) || !fs::is_directory(dir_path)) {
+    // Portable directory listing (avoid std::filesystem for macOS < 10.15)
+    std::vector<std::string> files;
+#ifdef _WIN32
+    WIN32_FIND_DATAA fd;
+    std::string pattern = dir_path + "\\*";
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
         throw std::runtime_error("Protocol directory not found: " + dir_path);
     }
-
-    // Collect and sort files for deterministic load order
-    std::vector<std::string> files;
-    for (auto& entry : fs::directory_iterator(dir_path)) {
-        if (entry.path().extension() == ".yaml" || entry.path().extension() == ".yml") {
-            files.push_back(entry.path().string());
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            std::string name(fd.cFileName);
+            std::string ext = path_extension(name);
+            if (ext == ".yaml" || ext == ".yml") {
+                files.push_back(dir_path + "\\" + name);
+            }
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+#else
+    DIR* dir = opendir(dir_path.c_str());
+    if (!dir) {
+        throw std::runtime_error("Protocol directory not found: " + dir_path);
+    }
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        std::string name(ent->d_name);
+        std::string ext = path_extension(name);
+        if (ext == ".yaml" || ext == ".yml") {
+            files.push_back(dir_path + "/" + name);
         }
     }
+    closedir(dir);
+#endif
     std::sort(files.begin(), files.end());
 
     // Load link_types first if present
     for (auto& f : files) {
-        if (fs::path(f).stem().string() == "link_types") {
+        if (path_stem(f) == "link_types") {
             load_file(f);
             break;
         }
@@ -235,7 +283,7 @@ void YamlLoader::load_directory(const std::string& dir_path) {
 
     // Load all protocol files
     for (auto& f : files) {
-        if (fs::path(f).stem().string() != "link_types") {
+        if (path_stem(f) != "link_types") {
             load_file(f);
         }
     }
