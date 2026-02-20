@@ -5,19 +5,52 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "wa1kpcap"
 version = "0.1.0"
-description = "Python PCAP Analysis Library with optional native C++ engine"
+description = "Dual-engine PCAP analysis library for flow-level feature extraction and protocol parsing"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+authors = [
+    { name = "1in_js", email = "ljs_2002@163.com" },
+]
+keywords = ["pcap", "network", "traffic", "flow", "packet", "protocol", "tls", "dns", "feature-extraction", "nids"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking :: Monitoring",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "PyYAML>=6.0",
+    "numpy>=1.23",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ljs-2002/wa1kpcap"
+Repository = "https://github.com/ljs-2002/wa1kpcap"
+Issues = "https://github.com/ljs-2002/wa1kpcap/issues"
 
 [project.optional-dependencies]
 dpkt = [
     "dpkt>=1.9",
 ]
+export = [
+    "pandas>=1.5",
+]
+crypto = [
+    "cryptography>=41.0",
+]
 dev = [
     "pytest>=7.0",
     "scapy>=2.5",
+    "pandas>=1.5",
+    "cryptography>=41.0",
 ]
 
 [tool.scikit-build]

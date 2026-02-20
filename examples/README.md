@@ -5,18 +5,19 @@ This directory contains usage examples for wa1kpcap.
 ## Examples
 
 ### basic_usage.py
-Demonstrates basic flow access using convenient attributes:
+Demonstrates basic flow access:
 ```python
-flow.src_ip       # Source IP address
-flow.sport        # Source port
-flow.dst_ip       # Destination IP address
-flow.dport        # Destination port
-flow.protocol     # Protocol number (6=TCP, 17=UDP)
-flow.proto        # Protocol name ("TCP", "UDP")
-flow.start_ts      # Flow start timestamp
-flow.end_ts        # Flow end timestamp
-flow.num_packets   # Number of packets
-flow.duration      # Flow duration
+flow.src_ip          # Source IP address
+flow.sport           # Source port
+flow.dst_ip          # Destination IP address
+flow.dport           # Destination port
+flow.protocol        # Protocol number (6=TCP, 17=UDP)
+flow.proto           # Protocol name ("TCP", "UDP")
+flow.start_time      # Flow start timestamp
+flow.end_time        # Flow end timestamp
+flow.packet_count    # Number of packets
+flow.byte_count      # Total bytes
+flow.duration        # Flow duration
 ```
 
 Run:
@@ -26,14 +27,26 @@ python examples/basic_usage.py
 
 ### feature_extraction.py
 Demonstrates all available features:
-- Sequence features (packet lengths, timestamps, IATs, payload bytes)
-- Statistical features (mean, std, min, max, median, etc.)
-- TCP-specific metrics (flags, window sizes, retransmissions)
+- Sequence features (packet lengths, IP/transport/app lengths, timestamps, IATs, tcp_flags)
+- Statistical features (mean, std, min, max, median, skew, kurt, cv, up/down variants)
+- Bidirectional metrics (up/down packet and byte counts)
+- TCP-specific metrics (SYN/FIN/RST/ACK/PSH counts, window sizes)
 - Protocol fields (TLS, HTTP, DNS)
 
 Run:
 ```bash
 python examples/feature_extraction.py
+```
+
+### custom_feature.py
+Demonstrates custom incremental feature registration:
+- Defining `BaseIncrementalFeature` subclasses
+- Registering features with `analyzer.register_feature()`
+- Accessing results via `flow.get_features()`
+
+Run:
+```bash
+python examples/custom_feature.py
 ```
 
 ### export_data.py
