@@ -1,87 +1,96 @@
 # Task Plan
 
-## Status: COMPLETE — 全部阶段完成
+## Status: READY — 待用户确认执行
 
 ## 概述
 
-六大工作块：git 保存、文档补全、5个内置协议、默认过滤器、应用层解析开关、全量测试。
+四大工作块：默认引擎切换（native 默认 + dpkt 可选）、项目文件清理、PyPI 发布指南、GitHub Actions CI/CD 指南。
 
 ## Phases
 
-### Phase 0: Git 保存当前状态
-- [x] 提交当前所有修改（skill、文档、CLAUDE.md 等）
+### Phase 1: 默认引擎切换 — native 默认，dpkt 可选
 
-### Phase 1: 文档补全 — merge() 和 Info 类继承说明
-- [x] `docs/protocol-overview.md` — 添加 Info 类架构对比（_SlottedInfoBase vs ProtocolInfo）、merge 机制说明
-- [x] `.claude/skills/add-custom-protocol/SKILL.md` — 添加 merge() 说明，明确继承 ProtocolInfo
-- [x] `.claude/skills/add-yaml-protocol/SKILL.md` — 说明通用 ProtocolInfo 的默认 merge 行为
-- [x] `docs/add-custom-protocol-guide.md` — 添加 merge() 章节
+#### 1a: pyproject.toml 依赖反转
+- [ ] `dependencies` 移除 `dpkt>=1.9`，只保留 `PyYAML>=6.0`（native 引擎 YAML 解析需要）
+- [ ] 新增 `[project.optional-dependencies] dpkt = ["dpkt>=1.9"]`
+- [ ] 移除原 `native` optional-dependencies（pybind11 是构建依赖不是运行依赖，PyYAML 已移入核心）
+- [ ] 用户安装方式变为：`pip install wa1kpcap`（native）、`pip install wa1kpcap[dpkt]`（额外装 dpkt）
 
-### Phase 2: 新增 5 个 built-in 协议
+#### 1b: analyzer.py 引擎默认值 + fallback
+- [ ] `engine` 参数默认值从 `"dpkt"` 改为 `"native"`
+- [ ] 当 `engine="dpkt"` 但 dpkt 未安装时：`warnings.warn("dpkt not installed, falling back to native engine")` 并自动切换
+- [ ] 更新 docstring
 
-每个协议需要：YAML 定义、C++ 代码（Type A 需 fast-path）、Python Info 类（_SlottedInfoBase）、父协议路由、converter 路径、单元测试
+#### 1c: `__init__.py` 延迟导入 dpkt 协议模块
+- [ ] `wa1kpcap/__init__.py`：将 `from wa1kpcap.protocols.base import ...` 和 `from wa1kpcap.protocols.registry import ...` 保留（不依赖 dpkt）
+- [ ] `wa1kpcap/__init__.py`：移除顶层 `from wa1kpcap.protocols.base import BaseProtocolHandler, ProtocolContext, ParseResult`（这些从 base.py 来，不依赖 dpkt，可保留）
+- [ ] `wa1kpcap/protocols/__init__.py`：将 link/network/transport/application 的导入改为延迟导入（try/except 或函数内导入），避免 `import wa1kpcap` 时因缺少 dpkt 而崩溃
+- [ ] 确保 `register_protocol` / `get_global_registry` 不触发 dpkt 导入
 
-#### 2a: GRE — Type A fast-path
-- IP proto 47，4字节基础头（flags + protocol_type）+ 可选 checksum(4B)/key(4B)/sequence(4B)
-- 下层路由：protocol_type 字段 → ethernet(0x6558)/ipv4(0x0800)/ipv6(0x86DD)
-- 支持 GRE v0 和 v1
-- 文件：gre.yaml, C++ fast-path, GREInfo(_SlottedInfoBase), converter, tests
+#### 1d: 测试验证
+- [ ] 全量测试通过（native 引擎）
+- [ ] 验证：卸载 dpkt 后 `import wa1kpcap` 正常、`Wa1kPcap()` 默认用 native
+- [ ] 验证：卸载 dpkt 后 `Wa1kPcap(engine="dpkt")` 打 warning 并 fallback
 
-#### 2b: VXLAN — Type A fast-path
-- UDP port 4789，8字节头（flags(1B) + reserved(3B) + VNI(3B) + reserved(1B)）
-- 下层路由：递归回 ethernet 解析内层帧
-- 文件：vxlan.yaml, C++ fast-path, VXLANInfo(_SlottedInfoBase), converter, tests
+### Phase 2: 项目根目录清理
 
-#### 2c: MPLS — Type A fast-path
-- ethertype 0x8847(unicast)/0x8848(multicast)，4字节/标签条目
-- 标签栈：解析所有标签直到 S=1（栈底），保存标签列表 + 栈深度
-- 栈底后按首字节判断 IPv4(0x4_)/IPv6(0x6_) 递归解析
-- 文件：mpls.yaml, C++ fast-path, MPLSInfo(_SlottedInfoBase), converter, tests
+#### 确认删除（开发临时文件）：
+- [ ] `benchmark_construction.py` — 构造性能测试（一次性）
+- [ ] `benchmark_dispatch.py` — 调度表性能测试（一次性）
+- [ ] `benchmark_pyobj.py` — Python 对象性能测试（一次性）
+- [ ] `benchmark_slots.py` — __slots__ 性能测试（一次性）
+- [ ] `gen_tls_report.py` — TLS 报告生成器（一次性）
+- [ ] `profile_breakdown.py` — 性能分析（一次性）
+- [ ] `profile_cpp_detail.py` — 性能分析（一次性）
+- [ ] `profile_cpp_real.py` — 性能分析（一次性）
+- [ ] `profile_native.py` — 性能分析（一次性）
+- [ ] `profile_wa1kpcap.py` — 性能分析（一次性）
+- [ ] `run_tests.py` — 测试运行器（pytest.ini 已替代）
+#### 用户要求保留的旧报告：
+- `benchmark_report_old.md`
+- `benchmark_report_old_old.md`
+- `benchmark_report_speed.md`
+- [ ] `tls_report.md` — TLS 报告（一次性产物）
+- [ ] `refactored-squishing-hennessy.md` — 临时文档
+- [ ] `dict_based.md` — 临时设计文档
 
-#### 2d: DHCP — Type B fill-only
-- UDP port 67/68，BOOTP 固定头(236B) + magic cookie(4B) + options TLV
-- 解析字段：op, htype, hlen, xid, client_mac, client_ip, your_ip, server_ip, gateway_ip
-- Options 解析：message_type(53), requested_ip(50), server_id(54), hostname(12), domain_name(15), dns_servers(6), lease_time(51), subnet_mask(1), router(3)
-- 文件：dhcp.yaml, DHCPInfo(_SlottedInfoBase), converter, tests
+#### 用户确认保留：
+- `context.md`, `plan_context.md`, `task_plan.md`, `findings.md`, `progress.md` — 全部保留
 
-#### 2e: DHCPv6 — Type B fill-only
-- UDP port 546/547，msg_type(1B) + transaction_id(3B) + options TLV
-- Options 解析：client_id(1), server_id(2), ia_na(3), ia_addr(5), dns_servers(23), domain_list(24), status_code(13)
-- 文件：dhcpv6.yaml, DHCPv6Info(_SlottedInfoBase), converter, tests
+#### 保留不动：
+- `benchmark.py` — 主基准测试（用户明确保留）
+- `benchmark_report.md` — 当前报告（用户明确保留）
+- `README.md` — 项目说明
+- `CLAUDE.md` — Claude Code 指令
+- `pyproject.toml` / `CMakeLists.txt` / `pytest.ini` / `.gitignore` — 构建配置
 
-### Phase 3: 默认过滤器参数
-- [x] Analyzer 新增 `default_filter` 参数
-- [x] 默认值：`"not arp and not icmp and not icmpv6 and not dhcp and not dhcpv6"`
-- [x] 与用户 `bpf_filter` 是 AND 关系：最终 = `(default_filter) and (bpf_filter)`
-- [x] `default_filter=None` 或 `default_filter=""` 禁用
-- [x] PacketFilter 和 NativeFilter 两条路径都支持
-- [x] BPF 修复：dhcp/dhcpv6/gre/vxlan 关键字支持 raw-byte 匹配
+### Phase 3: PyPI 发布指南（仅文档，不改代码）
 
-### Phase 4: 应用层解析开关
-- [x] Analyzer 新增 `app_layer_parsing` 参数，类型 str，可选 `"full"` / `"port_only"` / `"none"`
-- [x] `"full"`（默认）— 当前行为，启发式 + 端口匹配
-- [x] `"port_only"` — 只按端口映射（field-based mapping），跳过 heuristics
-- [x] `"none"` — TCP/UDP 之后停止，不解析应用层
-- [x] C++ 引擎：NativeParser 构造/parse 传递 mode，ProtocolEngine::parse_layer() 中判断
-- [x] Python dpkt 引擎：analyzer.py 中根据 mode 跳过应用层
-- [x] 原 4 档（full/fast/port_only/none）简化为 3 档，benchmark 证实 fast 与 port_only 无差异
+需要告知用户的内容：
+- [ ] pyproject.toml 补充：`license`, `authors`, `readme`, `classifiers`, `urls` 等元数据
+- [ ] scikit-build-core 的 wheel 构建：C++ 扩展会编译进 wheel
+- [ ] `wa1kpcap[dpkt]` extras 机制说明
+- [ ] sdist 发布：没有预编译 wheel 的平台会从源码编译（需要 CMake + C++17 编译器）
+- [ ] 发布命令：`python -m build` + `twine upload`
 
-### Phase 5: 全量测试 + 基准测试
-- [x] 运行全部单元测试确认无回归（363 passed, 2 skipped）
-- [x] 运行 benchmark 确认性能（full=20.7s, port_only=20.4s, none=20.2s）
-- [ ] 最终 git 提交
+### Phase 4: GitHub Actions CI/CD 指南（仅文档，不改代码）
+
+需要告知用户的内容：
+- [ ] cibuildwheel 配置：跨平台构建 wheel（Linux/macOS/Windows × x86_64/arm64）
+- [ ] GitHub Actions workflow 文件结构
+- [ ] PyPI trusted publisher 配置（无需 API token）
+- [ ] sdist 发布：源码分发包供无预编译 wheel 的平台本地编译
+- [ ] 触发条件：tag push（如 `v0.1.0`）
 
 ## Decisions Log
 
-| # | Decision | Rationale | Date |
-|---|----------|-----------|------|
-| 1 | GRE/VXLAN/MPLS 用 Type A fast-path | ✅ 用户确认。隧道协议在数据路径上，影响后续所有层解析 | confirmed |
-| 2 | DHCP/DHCPv6 用 Type B fill-only | ✅ 用户确认。应用层协议，不影响后续解析链 | confirmed |
-| 3 | VXLAN/MPLS 支持递归解析内层 | ✅ 用户确认。VXLAN→ethernet→IP/TCP/UDP，MPLS→IPv4/IPv6 | confirmed |
-| 4 | DHCP 解析扩展字段集 | ✅ 用户确认。基础 + domain_name/dns_servers/lease_time/subnet_mask/router | confirmed |
-| 5 | app_layer_parsing 三档设计 | ✅ 用户确认。full/port_only/none | confirmed |
-| 6 | default_filter 用端口/协议号实现 | DHCP/DHCPv6 用 UDP 端口过滤 | confirmed |
+| # | Decision | Rationale | Status |
+|---|----------|-----------|--------|
+| 1 | native 为默认引擎 | C++ 引擎性能更好，不依赖第三方 Python 包 | pending |
+| 2 | dpkt 降为 optional dependency | 通过 `wa1kpcap[dpkt]` 安装 | pending |
+| 3 | protocols/__init__.py 延迟导入 | 避免 import wa1kpcap 时因缺少 dpkt 崩溃 | pending |
+| 4 | Phase 3/4 仅提供指南不改代码 | 用户要求"告诉我需要做什么" | pending |
 
 ## Blocked / Open Questions
 
-_(All resolved)_
+1. 根目录 `context.md`, `plan_context.md`, `task_plan.md`, `findings.md`, `progress.md` 是否删除？

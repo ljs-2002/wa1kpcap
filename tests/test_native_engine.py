@@ -248,10 +248,10 @@ class TestConverter:
 class TestEngineParameter:
     """Test that the engine parameter is accepted."""
 
-    def test_dpkt_engine_default(self):
+    def test_native_engine_default(self):
         from wa1kpcap import Wa1kPcap
         analyzer = Wa1kPcap()
-        assert analyzer._engine == "dpkt"
+        assert analyzer._engine == "native"
 
     def test_dpkt_engine_explicit(self):
         from wa1kpcap import Wa1kPcap
