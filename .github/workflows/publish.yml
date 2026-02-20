@@ -79,8 +79,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Extract latest release notes
+        run: |
+          awk '/^## v/{if(found) exit; found=1} found' CHANGELOG.md > RELEASE_NOTES.tmp
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.tmp
