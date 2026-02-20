@@ -3,6 +3,7 @@ Tests for simplified BPF filter functionality.
 """
 
 import pytest
+from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap, PacketFilter, compile_filter, BPFCompiler
 from wa1kpcap.core.filter import (
     ProtocolCondition,
@@ -348,7 +349,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_tcp_filter(self):
         """Test analyzing with TCP filter."""
         analyzer = Wa1kPcap(bpf_filter="tcp", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # All flows should be TCP
         for flow in flows:
@@ -357,7 +358,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_udp_filter(self):
         """Test analyzing with UDP filter."""
         analyzer = Wa1kPcap(bpf_filter="udp", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # All flows should be UDP
         for flow in flows:
@@ -366,7 +367,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_port_filter(self):
         """Test analyzing with port filter."""
         analyzer = Wa1kPcap(bpf_filter="port 443", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # All flows should have port 443
         for flow in flows:
@@ -376,7 +377,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_tls_filter(self):
         """Test analyzing with TLS filter (app layer)."""
         analyzer = Wa1kPcap(bpf_filter="tls", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # All flows should have TLS
         for flow in flows:
@@ -385,7 +386,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_not_filter(self):
         """Test analyzing with NOT filter."""
         analyzer = Wa1kPcap(bpf_filter="not udp", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # No flows should be UDP
         for flow in flows:
@@ -394,7 +395,7 @@ class TestWa1kPcapBPFIntegration:
     def test_analyze_with_complex_filter(self):
         """Test analyzing with complex filter."""
         analyzer = Wa1kPcap(bpf_filter="port 443 or port 80", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         # All flows should have port 443 or 80
         for flow in flows:
@@ -405,17 +406,17 @@ class TestWa1kPcapBPFIntegration:
     def test_filter_reduces_flow_count(self):
         """Test that filter reduces flow count."""
         analyzer_all = Wa1kPcap(verbose_mode=False)
-        flows_all = analyzer_all.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows_all = analyzer_all.analyze_file(MULTI_PCAP)
 
         analyzer_filtered = Wa1kPcap(bpf_filter="tcp and port 443", verbose_mode=False)
-        flows_filtered = analyzer_filtered.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows_filtered = analyzer_filtered.analyze_file(MULTI_PCAP)
 
         assert len(flows_filtered) < len(flows_all)
 
     def test_filter_stats(self):
         """Test that filter stats are recorded."""
         analyzer = Wa1kPcap(bpf_filter="tcp", verbose_mode=False)
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
 
         stats = analyzer.stats
         assert 'packets_filtered' in stats
@@ -426,20 +427,20 @@ class TestWa1kPcapBPFIntegration:
         """Test that no filter allows all flows."""
         analyzer = Wa1kPcap(verbose_mode=False, default_filter=None)
         assert analyzer._packet_filter is None
-        flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows = analyzer.analyze_file(MULTI_PCAP)
         assert len(flows) > 0
 
     def test_host_filter(self):
         """Test host filter."""
         # Find an IP that exists in the pcap
         analyzer_all = Wa1kPcap(verbose_mode=False)
-        flows_all = analyzer_all.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+        flows_all = analyzer_all.analyze_file(MULTI_PCAP)
 
         if flows_all:
             target_ip = flows_all[0].key.src_ip
 
             analyzer = Wa1kPcap(bpf_filter=f"host {target_ip}", verbose_mode=False)
-            flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+            flows = analyzer.analyze_file(MULTI_PCAP)
 
             # All flows should involve the target IP
             for flow in flows:

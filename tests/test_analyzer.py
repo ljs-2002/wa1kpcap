@@ -4,7 +4,6 @@ import pytest
 import sys
 import os
 import tempfile
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
 
 from wa1kpcap.core.analyzer import Wa1kPcap
 from wa1kpcap.core.flow import Flow, FlowKey, FlowMetrics

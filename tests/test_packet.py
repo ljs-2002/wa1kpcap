@@ -3,7 +3,7 @@
 import pytest
 import sys
 import struct
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
+
 
 from wa1kpcap.core.packet import ParsedPacket, EthernetInfo, IPInfo, IP6Info, TCPInfo, UDPInfo, ICMPInfo
 from wa1kpcap.core.flow import Flow, FlowKey

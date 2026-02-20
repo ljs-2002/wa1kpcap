@@ -3,9 +3,14 @@
 import pytest
 import sys
 import os
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Test pcap directory
+TEST_PCAP_DIR = Path(__file__).resolve().parent.parent / 'test'
+MULTI_PCAP = str(TEST_PCAP_DIR / 'multi.pcap')
 
 
 @pytest.fixture

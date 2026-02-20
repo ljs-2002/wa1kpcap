@@ -64,7 +64,7 @@ nul
 *.pcap
 *.pcapng
 *.npz
-test/
+!test/*.pcap
 
 # Scratch scripts & docs
 extract_*.py

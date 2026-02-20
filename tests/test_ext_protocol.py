@@ -3,6 +3,7 @@ Tests for ext_protocol field in Flow.
 """
 
 import pytest
+from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap
 from wa1kpcap.core.flow import Flow, FlowKey
 from wa1kpcap.core.packet import ParsedPacket, IPInfo, TCPInfo, TLSInfo
@@ -149,7 +150,7 @@ def test_flow_to_dict_includes_ext_protocol():
 def test_analyzer_sets_ext_protocol():
     """Test that analyzer sets ext_protocol for flows."""
     analyzer = Wa1kPcap(verbose_mode=False)
-    flows = analyzer.analyze_file('D:/MyProgram/wa1kpcap1/test/multi.pcap')
+    flows = analyzer.analyze_file(MULTI_PCAP)
 
     # Check that all flows have ext_protocol set
     for flow in flows:

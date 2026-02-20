@@ -3,8 +3,8 @@
 import pytest
 import sys
 import os
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
 
+from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap
 from wa1kpcap.protocols.application import TLSFlowState, parse_tls, parse_cert_der, get_extension_name
 from wa1kpcap.core.flow import Flow, FlowKey
@@ -14,7 +14,7 @@ from wa1kpcap.core.packet import ParsedPacket, TLSInfo
 # Test with real pcap file (multi.pcap contains TLS flows)
 def test_tls_with_multi_pcap():
     """Test TLS parsing with real multi.pcap file."""
-    pcap_path = r'D:\MyProgram\wa1kpcap1\test\multi.pcap'
+    pcap_path = MULTI_PCAP
 
     if not os.path.exists(pcap_path):
         pytest.skip("multi.pcap not found")
