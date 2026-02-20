@@ -1,0 +1,12 @@
+include LICENSE
+include README.md
+include CMakeLists.txt
+
+# C++ source
+recursive-include src/cpp *.h *.hpp *.cpp *.c
+
+# YAML protocol definitions
+recursive-include wa1kpcap *.yaml
+
+# pybind11 build support
+include pyproject.toml

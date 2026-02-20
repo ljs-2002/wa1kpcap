@@ -1,26 +1,17 @@
 """
-wa1kpcap - Python PCAP Analysis Library
+wa1kpcap - Dual-engine PCAP analysis library.
 
-A powerful PCAP analysis library providing flow-level feature extraction
-and protocol field parsing using dpkt.
+Flow-level feature extraction and protocol field parsing using a native
+C++ engine (default) or dpkt as fallback.
 
-Example usage:
+Example::
+
     from wa1kpcap import Wa1kPcap
 
-    analyzer = Wa1kPcap(verbose_mode=True, filter_ack=True)
+    analyzer = Wa1kPcap()
     flows = analyzer.analyze_file('traffic.pcap')
-
     for flow in flows:
-        print(f"Flow: {flow.key}")
-        print(f"  Packets: {flow.packet_count}")
-        print(f"  Duration: {flow.duration:.3f}s")
-
-        if flow.tls:
-            print(f"  TLS SNI: {flow.tls.sni}")
-
-        if flow.features:
-            stats = flow.features._statistics
-            print(f"  Mean packet length: {stats.get('packet_lengths', {}).get('mean', 0):.1f}")
+        print(f"{flow.key}  packets={flow.packet_count}")
 """
 
 from wa1kpcap.core.analyzer import Wa1kPcap
@@ -46,7 +37,7 @@ from wa1kpcap.exporters import (
 )
 
 __version__ = "0.1.0"
-__author__ = "wa1k"
+__author__ = "1in_js"
 
 __all__ = [
     # Main class

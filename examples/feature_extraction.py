@@ -2,10 +2,13 @@
 Feature extraction example.
 
 Demonstrates all available features that can be extracted from flows:
+- Basic flow info and bidirectional metrics
+- Sequence features (packet lengths, timestamps, IATs, etc.)
+- Statistical features (mean, std, min, max, median, skew, kurt, etc.)
+- Protocol-specific fields (TLS, HTTP, DNS)
 """
 
 from wa1kpcap import Wa1kPcap
-import json
 
 # Create analyzer with all features enabled
 analyzer = Wa1kPcap(
@@ -29,18 +32,19 @@ for i, flow in enumerate(flows[:5]):
     # === Basic Flow Info ===
     print("Basic Flow Info:")
     print(f"  Protocol: {flow.protocol} ({flow.proto})")
-    print(f"  Packets: {flow.num_packets}")
+    print(f"  Packets: {flow.packet_count}")
+    print(f"  Bytes: {flow.byte_count}")
     print(f"  Duration: {flow.duration:.3f}s")
-    print(f"  Start: {flow.start_ts:.3f}s")
-    print(f"  End: {flow.end_ts:.3f}s")
+    print(f"  Start: {flow.start_time:.3f}s")
+    print(f"  End: {flow.end_time:.3f}s")
     print()
 
     # === Bidirectional Stats ===
     print("Bidirectional Stats:")
-    print(f"  Forward packets: {flow.metrics.forward_packet_count}")
-    print(f"  Forward bytes: {flow.metrics.forward_byte_count}")
-    print(f"  Reverse packets: {flow.metrics.reverse_packet_count}")
-    print(f"  Reverse bytes: {flow.metrics.reverse_byte_count}")
+    print(f"  Up packets: {flow.metrics.up_packet_count}")
+    print(f"  Up bytes: {flow.metrics.up_byte_count}")
+    print(f"  Down packets: {flow.metrics.down_packet_count}")
+    print(f"  Down bytes: {flow.metrics.down_byte_count}")
     print()
 
     # === TCP-specific Metrics ===
@@ -53,7 +57,7 @@ for i, flow in enumerate(flows[:5]):
         print(f"  PSH count: {flow.metrics.psh_count}")
         print(f"  Window min: {flow.metrics.min_window}")
         print(f"  Window max: {flow.metrics.max_window}")
-        print(f"  Window avg: {flow.metrics.sum_window / flow.num_packets if flow.num_packets > 0 else 0:.1f}")
+        print(f"  Window avg: {flow.metrics.sum_window / flow.packet_count if flow.packet_count > 0 else 0:.1f}")
         print()
 
     # === Sequence Features ===
@@ -88,8 +92,6 @@ for i, flow in enumerate(flows[:5]):
             print(f"    Kurtosis: {pkt_stats.get('kurt', 0):.4f}")
             print(f"    CV: {pkt_stats.get('cv', 0):.4f}")
 
-
-
         iat_stats = stats.get('iats', {})
         if iat_stats:
             print(f"  IAT stats:")
@@ -120,8 +122,9 @@ for i, flow in enumerate(flows[:5]):
         if flow.tls.alpn:
             print(f"  ALPN: {flow.tls.alpn}")
         if flow.tls.certificate:
-            print(f"  Cert subject: {flow.tls.certificate.subject}")
-            print(f"  Cert issuer: {flow.tls.certificate.issuer}")
+            cert = flow.tls.certificate
+            print(f"  Cert subject: {cert.get('subject') if isinstance(cert, dict) else cert.subject}")
+            print(f"  Cert issuer: {cert.get('issuer') if isinstance(cert, dict) else cert.issuer}")
         print()
 
     # HTTP
@@ -129,15 +132,15 @@ for i, flow in enumerate(flows[:5]):
         print("HTTP Fields:")
         print(f"  Method: {flow.http.method}")
         print(f"  Host: {flow.http.host}")
-        print(f"  User-Agent: {flow.http.user_agent}")
         print(f"  Path: {flow.http.path}")
+        print(f"  User-Agent: {flow.http.user_agent}")
         print()
 
     # DNS
     if flow.dns:
         print("DNS Fields:")
         print(f"  Queries: {flow.dns.queries}")
-        print(f"  Response codes: {flow.dns.response_codes}")
+        print(f"  Response code: {flow.dns.response_code}")
         print()
 
     print("=" * 50)

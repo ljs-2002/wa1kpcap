@@ -12,7 +12,7 @@ Usage:
 """
 
 from wa1kpcap import Wa1kPcap, Flow
-from wa1kpcap.features.registry import BaseIncrementalFeature, FeatureType, register_feature
+from wa1kpcap.features.registry import BaseIncrementalFeature, FeatureType
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Any
@@ -235,7 +235,7 @@ print()
 
 for flow in flows:
     print(f"Flow: {flow.src_ip}:{flow.sport} -> {flow.dst_ip}:{flow.dport}, {flow.proto}")
-    print(f"  Packets: {flow.num_packets}")
+    print(f"  Packets: {flow.packet_count}")
     print(f"  Duration: {flow.duration:.6f}s")
     print()
 

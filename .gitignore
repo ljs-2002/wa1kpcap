@@ -59,3 +59,23 @@ Makefile
 .DS_Store
 Thumbs.db
 nul
+
+# Data files
+*.pcap
+*.pcapng
+*.npz
+test/
+
+# Scratch scripts & docs
+extract_*.py
+benchmark*
+docs/
+
+# Planning files
+task_plan.md
+findings.md
+progress.md
+
+# Internal-only skills (keep locally, don't commit)
+.claude/skills/add-builtin-protocol/
+.claude/skills/protocol-guide/
