@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.1 (2026-02-21)
+
+### Bug Fixes
+
+- Make dpkt a truly optional dependency: core analysis now works without dpkt installed
+- Replace std::filesystem with portable helpers for macOS < 10.15 compatibility
+- Fix hardcoded Windows paths in test files for cross-platform CI
+- Remove License classifier conflicting with SPDX license expression
+
+### Improvements
+
+- Add paths-ignore to test workflow to skip CI on docs/workflow-only changes
+- Add no-dpkt smoke test to catch optional dependency issues
+
 ## v0.1.0 (2026-02-20)
 
 Initial release.

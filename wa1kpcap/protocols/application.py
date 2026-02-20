@@ -19,7 +19,12 @@ from wa1kpcap.protocols.registry import register_protocol
 if TYPE_CHECKING:
     from wa1kpcap.core.packet import ParsedPacket
 
-import dpkt.ssl
+try:
+    import dpkt.ssl
+    import dpkt.dns
+    _HAS_DPKT = True
+except ImportError:
+    _HAS_DPKT = False
 
 
 # TLS constants from reference implementation
@@ -59,7 +64,7 @@ def parse_ext_data_with_data_len(buf: bytes, ext_lenbytes: int = 2, data_lenbyte
         pointer = ext_lenbytes
         while pointer < extensions_length:
             try:
-                ext_data, parsed = dpkt.ssl.parse_variable_array(buf[pointer:], data_lenbytes)
+                ext_data, parsed = dpkt.ssl.parse_variable_array(buf[pointer:], data_lenbytes) if _HAS_DPKT else (b'', 0)
                 extensions.append(ext_data)
                 pointer += parsed
             except Exception:
@@ -236,6 +241,8 @@ def parse_handshake(data: bytes, prev_tls: TLSFlowState) -> int:
 
     Reference: D:\MyProgram\wa1kpcap\Wa1kPcap\protocols\tls.py parse_handshake
     """
+    if not _HAS_DPKT:
+        return len(data)
     handshake = dpkt.ssl.TLSHandshake(data)
 
     if handshake.type == CLIENT_HELLO_TYPE:
@@ -274,6 +281,9 @@ def parse_tls(data: bytes, prev_tls: TLSFlowState | None) -> tuple[TLSFlowState,
     if not prev_tls:
         prev_tls = TLSFlowState()
 
+    if not _HAS_DPKT:
+        return prev_tls, 0
+
     try:
         msgs, i = dpkt.ssl.tls_multi_factory(data)
     except dpkt.ssl.SSL3Exception:
@@ -287,7 +297,7 @@ def parse_tls(data: bytes, prev_tls: TLSFlowState | None) -> tuple[TLSFlowState,
         while pointer < total_length:
             try:
                 length = parse_handshake(msg_data[pointer:], prev_tls)
-            except (dpkt.ssl.SSL3Exception, dpkt.dpkt.NeedData):
+            except Exception:
                 break
             pointer += length
 
@@ -379,7 +389,7 @@ class TLSHandler(BaseProtocolHandler):
 
     def parse(self, payload: bytes, context: ProtocolContext, is_client_to_server: bool) -> ParseResult:
         """Parse TLS record - simplified for compatibility."""
-        if len(payload) < 5:
+        if not _HAS_DPKT or len(payload) < 5:
             return ParseResult(success=False)
 
         try:
@@ -508,7 +518,7 @@ class DNSHandler(BaseProtocolHandler):
 
     def parse(self, payload: bytes, context: ProtocolContext, is_client_to_server: bool) -> ParseResult:
         """Parse DNS message."""
-        if len(payload) < 12:
+        if not _HAS_DPKT or len(payload) < 12:
             return ParseResult(success=False)
 
         try:
