@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import time
+import warnings
 
 if TYPE_CHECKING:
     from wa1kpcap.core.reader import PcapReader
@@ -107,6 +108,7 @@ class Wa1kPcap:
         compute_statistics: Compute statistical features (default: True)
         enable_reassembly: Enable IP/TCP/TLS reassembly (default: True)
         protocols: List of protocols to parse (default: all supported)
+        engine: Parsing engine - "native" (default, C++) or "dpkt" (requires pip install wa1kpcap[dpkt])
 
     Examples:
         Basic usage:
@@ -187,9 +189,21 @@ class Wa1kPcap:
         protocols: list[str] | None = None,
         app_layer_parsing: str = "full",
 
-        # Engine selection: "dpkt" (default) or "native" (C++ engine)
-        engine: str = "dpkt",
+        # Engine selection: "native" (default, C++ engine) or "dpkt" (requires dpkt package)
+        engine: str = "native",
     ):
+        # dpkt fallback: if user requests dpkt but it's not installed, warn and use native
+        if engine == "dpkt":
+            try:
+                import dpkt  # noqa: F401
+            except ImportError:
+                warnings.warn(
+                    "dpkt is not installed. Falling back to native engine. "
+                    "Install dpkt with: pip install wa1kpcap[dpkt]",
+                    stacklevel=2,
+                )
+                engine = "native"
+
         self._engine = engine
         self.udp_timeout = udp_timeout
         self.tcp_cleanup_timeout = tcp_cleanup_timeout

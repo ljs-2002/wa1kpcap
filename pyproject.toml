@@ -8,13 +8,12 @@ version = "0.1.0"
 description = "Python PCAP Analysis Library with optional native C++ engine"
 requires-python = ">=3.10"
 dependencies = [
-    "dpkt>=1.9",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
-native = [
-    "pybind11>=2.11",
-    "PyYAML>=6.0",
+dpkt = [
+    "dpkt>=1.9",
 ]
 dev = [
     "pytest>=7.0",
