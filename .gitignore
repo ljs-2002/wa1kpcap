@@ -80,3 +80,8 @@ progress.md
 
 # Internal-only skills (keep locally, don't commit)
 .claude/
+
+# Claude Code / local-only files
+CLAUDE.md
+plan_context.md
+test.csv
