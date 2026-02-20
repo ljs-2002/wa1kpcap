@@ -4,7 +4,6 @@ import pytest
 import sys
 import tempfile
 import struct
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
 
 from wa1kpcap.core.reader import (
     PcapReader,

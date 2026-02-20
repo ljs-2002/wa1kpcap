@@ -7,8 +7,6 @@ import json
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
-
 from wa1kpcap.exporters import to_dataframe, to_dict, to_json, to_csv, to_list_of_dicts, FlowExporter
 from wa1kpcap.core.flow import Flow, FlowKey
 from wa1kpcap.features import FlowFeatures

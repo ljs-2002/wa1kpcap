@@ -2,7 +2,6 @@
 
 import pytest
 import sys
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
 
 from wa1kpcap.core.flow import FlowKey, FlowMetrics
 

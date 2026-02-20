@@ -3,7 +3,7 @@
 import pytest
 import sys
 import numpy as np
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
+
 
 from wa1kpcap.features.extractor import FlowFeatures, FeatureExtractor
 from wa1kpcap.features.registry import (

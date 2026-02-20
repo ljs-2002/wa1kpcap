@@ -10,8 +10,6 @@ import os
 import tempfile
 import struct
 
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
-
 from wa1kpcap import Wa1kPcap
 from wa1kpcap.core.flow import Flow, FlowKey
 from wa1kpcap.core.packet import ParsedPacket, IPInfo, TCPInfo, UDPInfo, DNSInfo, HTTPInfo

@@ -5,8 +5,7 @@ import sys
 import os
 import tempfile
 
-sys.path.insert(0, r'D:\MyProgram\wa1kpcap1')
-
+from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap
 from wa1kpcap.features.registry import FeatureRegistry, FeatureType
 from wa1kpcap.protocols.base import BaseProtocolHandler, Layer
@@ -17,7 +16,7 @@ import numpy as np
 
 def test_analyzer_with_udp_timeout():
     """Test analyzer with different UDP timeout settings."""
-    pcap_path = r'D:\MyProgram\wa1kpcap1\test\multi.pcap'
+    pcap_path = MULTI_PCAP
     if not os.path.exists(pcap_path):
         pytest.skip("multi.pcap not found")
 
@@ -29,7 +28,7 @@ def test_analyzer_with_udp_timeout():
 
 def test_analyzer_with_tcp_cleanup_timeout():
     """Test analyzer with different TCP cleanup timeout."""
-    pcap_path = r'D:\MyProgram\wa1kpcap1\test\multi.pcap'
+    pcap_path = MULTI_PCAP
     if not os.path.exists(pcap_path):
         pytest.skip("multi.pcap not found")
 
