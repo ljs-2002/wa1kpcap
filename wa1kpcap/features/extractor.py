@@ -120,6 +120,8 @@ class FlowFeatures:
                 named['iats'] = self.iats
             if len(self.payload_bytes) > 0:
                 named['payload_bytes'] = self.payload_bytes
+            if len(self.tcp_flags) > 0:
+                named['tcp_flags'] = self.tcp_flags.astype(np.float64)
             if len(self.tcp_window_sizes) > 0:
                 named['tcp_window'] = self.tcp_window_sizes
             if named:
@@ -155,6 +157,8 @@ class FlowFeatures:
                 stats['iats'] = self._compute_array_stats(self.iats)
             if len(self.payload_bytes) > 0:
                 stats['payload_bytes'] = self._compute_array_stats(self.payload_bytes)
+            if len(self.tcp_flags) > 0:
+                stats['tcp_flags'] = self._compute_array_stats(self.tcp_flags.astype(np.float64))
             if len(self.tcp_window_sizes) > 0:
                 stats['tcp_window'] = self._compute_array_stats(self.tcp_window_sizes)
 
@@ -163,9 +167,15 @@ class FlowFeatures:
         if pkt_stats:
             stats['packet_count'] = pkt_stats['count']
             stats['total_bytes'] = int(pkt_stats['sum'])
+            up_count = pkt_stats['up_count']
+            down_count = pkt_stats['down_count']
+            up_bytes = int(pkt_stats['up_sum'])
+            down_bytes = int(pkt_stats['down_sum'])
         else:
             stats['packet_count'] = len(self.packet_lengths)
             stats['total_bytes'] = 0
+            up_count = down_count = 0
+            up_bytes = down_bytes = 0
         iat_stats = stats.get('iats')
         if iat_stats:
             stats['duration'] = iat_stats['sum']
@@ -173,6 +183,10 @@ class FlowFeatures:
             stats['duration'] = float(self.timestamps[-1] - self.timestamps[0])
         else:
             stats['duration'] = 0.0
+
+        # Directional ratios
+        stats['up_down_pkt_ratio'] = float(up_count) / float(down_count) if down_count > 0 else 0.0
+        stats['up_down_byte_ratio'] = float(up_bytes) / float(down_bytes) if down_bytes > 0 else 0.0
 
         self._statistics = stats
         return stats
