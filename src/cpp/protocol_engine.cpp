@@ -1,6 +1,7 @@
 #include "protocol_engine.h"
 #include "expression_eval.h"
 #include "hardcoded_parsers.h"
+#include "quic_crypto.h"
 #include "util.h"
 
 #include <stdexcept>
@@ -190,6 +191,9 @@ ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
     fast_dispatch_["dhcpv6"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
         return fast_parse_dhcpv6(buf, len, pkt);
     };
+    fast_dispatch_["quic"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_quic(buf, len, pkt);
+    };
 
     // ── Populate slow-path fill dispatch table ──
     fill_dispatch_["ethernet"] = [this](SlowFillContext& ctx) {
@@ -263,6 +267,9 @@ ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
     fill_dispatch_["tls_client_hello"] = tls_layer_fn;
     fill_dispatch_["tls_server_hello"] = tls_layer_fn;
     fill_dispatch_["tls_certificate"] = tls_layer_fn;
+    fill_dispatch_["quic"] = [this](SlowFillContext& ctx) {
+        fill_quic(ctx.pkt, ctx.fields);
+    };
 }
 
 ProtocolEngine::ParseResult ProtocolEngine::parse_layer(
@@ -2010,7 +2017,172 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_dhcpv6(
     return {len, ""};  // terminal protocol, no next
 }
 
-// ── parse_packet_struct: parse full packet into C++ struct ──
+// ── QUIC version constants ──
+static const uint32_t QUIC_V1 = 0x00000001;
+static const uint32_t QUIC_V2 = 0x6b3343cf;
+
+static const char* quic_version_str(uint32_t ver) {
+    switch (ver) {
+        case QUIC_V1: return "QUICv1";
+        case QUIC_V2: return "QUICv2";
+        default: return "unknown";
+    }
+}
+
+static bool is_quic_version(uint32_t ver) {
+    return ver == QUIC_V1 || ver == QUIC_V2;
+}
+
+static const char* quic_long_packet_type_str(int type) {
+    switch (type) {
+        case 0: return "Initial";
+        case 1: return "0-RTT";
+        case 2: return "Handshake";
+        case 3: return "Retry";
+        default: return "unknown";
+    }
+}
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_quic(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    if (len < 5) return {};
+
+    uint8_t first = buf[0];
+    bool is_long = (first & 0x80) != 0;
+
+    if (is_long) {
+        // Long Header: 1 byte header + 4 bytes version + DCID len + DCID + SCID len + SCID
+        if (len < 7) return {};  // minimum: 1 + 4 + 1 + 0 + 1 + 0
+
+        uint32_t version = (static_cast<uint32_t>(buf[1]) << 24) |
+                           (static_cast<uint32_t>(buf[2]) << 16) |
+                           (static_cast<uint32_t>(buf[3]) << 8)  |
+                           static_cast<uint32_t>(buf[4]);
+
+        if (!is_quic_version(version)) return {};  // not QUIC, let other parsers handle it
+
+        pkt.has_quic = true;
+        auto& q = pkt.quic;
+        q.is_long_header = true;
+        q.version = version;
+        q.version_str = quic_version_str(version);
+
+        // Packet type: bits 4-5 of first byte (for v1)
+        q.packet_type = (first >> 4) & 0x03;
+        q.packet_type_str = quic_long_packet_type_str(q.packet_type);
+
+        size_t offset = 5;
+
+        // DCID
+        if (offset >= len) return {offset, ""};
+        q.dcid_len = buf[offset++];
+        if (offset + q.dcid_len > len) return {offset, ""};
+        q.dcid.assign(reinterpret_cast<const char*>(buf + offset), q.dcid_len);
+        offset += q.dcid_len;
+
+        // SCID
+        if (offset >= len) return {offset, ""};
+        q.scid_len = buf[offset++];
+        if (offset + q.scid_len > len) return {offset, ""};
+        q.scid.assign(reinterpret_cast<const char*>(buf + offset), q.scid_len);
+        offset += q.scid_len;
+
+        // Initial packet: token length + token + decryption
+        if (q.packet_type == 0) {
+            // Token length is a variable-length integer
+            if (offset >= len) return {offset, ""};
+            uint8_t first_token_byte = buf[offset];
+            uint8_t prefix = first_token_byte >> 6;
+            uint64_t token_len = 0;
+
+            if (prefix == 0) {
+                token_len = first_token_byte & 0x3f;
+                offset += 1;
+            } else if (prefix == 1) {
+                if (offset + 2 > len) return {offset, ""};
+                token_len = ((static_cast<uint64_t>(first_token_byte) & 0x3f) << 8) |
+                            buf[offset + 1];
+                offset += 2;
+            } else if (prefix == 2) {
+                if (offset + 4 > len) return {offset, ""};
+                token_len = ((static_cast<uint64_t>(first_token_byte) & 0x3f) << 24) |
+                            (static_cast<uint64_t>(buf[offset + 1]) << 16) |
+                            (static_cast<uint64_t>(buf[offset + 2]) << 8) |
+                            buf[offset + 3];
+                offset += 4;
+            } else {
+                if (offset + 8 > len) return {offset, ""};
+                token_len = ((static_cast<uint64_t>(first_token_byte) & 0x3f) << 56) |
+                            (static_cast<uint64_t>(buf[offset + 1]) << 48) |
+                            (static_cast<uint64_t>(buf[offset + 2]) << 40) |
+                            (static_cast<uint64_t>(buf[offset + 3]) << 32) |
+                            (static_cast<uint64_t>(buf[offset + 4]) << 24) |
+                            (static_cast<uint64_t>(buf[offset + 5]) << 16) |
+                            (static_cast<uint64_t>(buf[offset + 6]) << 8) |
+                            buf[offset + 7];
+                offset += 8;
+            }
+
+            q.token_len = static_cast<int64_t>(token_len);
+            if (token_len > 0 && offset + token_len <= len) {
+                q.token.assign(reinterpret_cast<const char*>(buf + offset), token_len);
+                offset += token_len;
+            }
+
+            // Attempt Initial packet decryption to extract Client Hello
+            auto decrypt_result = quic_crypto::decrypt_initial_packet(buf, len);
+            if (decrypt_result.success && !decrypt_result.plaintext.empty()) {
+                // Extract CRYPTO frames (contain TLS ClientHello)
+                auto crypto_data = quic_crypto::extract_crypto_frames(
+                    decrypt_result.plaintext.data(), decrypt_result.plaintext.size());
+
+                if (!crypto_data.empty()) {
+                    // Parse the TLS handshake message via YAML engine
+                    // CRYPTO frame contains raw TLS handshake: type(1) + length(3) + body
+                    auto tls_pkt = parse_from_protocol_struct(
+                        crypto_data.data(), crypto_data.size(), "tls_handshake");
+
+                    // Copy extracted TLS fields into QUIC info
+                    if (tls_pkt.has_tls) {
+                        if (!tls_pkt.tls.sni.empty())
+                            q.sni = tls_pkt.tls.sni;
+                        if (!tls_pkt.tls.alpn.empty())
+                            q.alpn = tls_pkt.tls.alpn;
+                        if (!tls_pkt.tls.cipher_suites.empty())
+                            q.cipher_suites = tls_pkt.tls.cipher_suites;
+                    }
+                }
+            }
+        }
+
+        return {len, ""};  // terminal protocol
+    } else {
+        // Short Header: first byte bit 7 = 0
+        // Cannot identify as QUIC without flow state — return empty to let caller handle
+        return {};
+    }
+}
+
+void ProtocolEngine::fill_quic(NativeParsedPacket& pkt, const FieldMap& fm) const {
+    pkt.has_quic = true;
+    auto& q = pkt.quic;
+    for (auto& [key, val] : fm) {
+        if (key == "is_long_header") q.is_long_header = field_to_int(val) != 0;
+        else if (key == "packet_type") q.packet_type = field_to_int(val);
+        else if (key == "version") q.version = field_to_int(val);
+        else if (key == "dcid") q.dcid = field_to_string(val);
+        else if (key == "scid") q.scid = field_to_string(val);
+        else if (key == "dcid_len") q.dcid_len = field_to_int(val);
+        else if (key == "scid_len") q.scid_len = field_to_int(val);
+        else if (key == "token") q.token = field_to_string(val);
+        else if (key == "token_len") q.token_len = field_to_int(val);
+        else if (key == "spin_bit") q.spin_bit = field_to_int(val) != 0;
+        else if (key == "sni") q.sni = field_to_string(val);
+        else if (key == "version_str") q.version_str = field_to_string(val);
+        else if (key == "packet_type_str") q.packet_type_str = field_to_string(val);
+    }
+}
 // ── parse_packet_struct: structured output path ──
 
 NativeParsedPacket ProtocolEngine::parse_packet_struct(

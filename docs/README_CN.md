@@ -475,4 +475,19 @@ wa1kpcap/
 │   ├── extractor.py         # FeatureExtractor、FlowFeatures
 │   └── registry.py          # 特征注册表
 └── exporters.py             # DataFrame/CSV/JSON 导出
+
+src/cpp/                         # C++ 原生引擎
+├── bindings.cpp                 # pybind11 Python 绑定
+├── pcap_reader.cpp/h            # PCAP/PCAPNG 读取器
+├── protocol_engine.cpp/h        # 协议解析引擎 + 快速路径解析器
+├── yaml_loader.cpp/h            # YAML 协议定义加载器
+├── quic_crypto.cpp/h            # QUIC Initial 解密（SHA-256、HKDF、AES-128-GCM）
+├── hardcoded_parsers.cpp/h      # 硬编码协议解析器（DNS 等）
+├── bpf_filter.cpp/h             # BPF 过滤器编译器
+├── expression_eval.cpp/h        # YAML 条件表达式求值器
+├── flow_buffer.cpp/h            # TCP 流重组缓冲区
+├── parsed_packet.h              # NativeParsedPacket 结构体定义
+├── field_value.h                # FieldValue 变体类型
+├── protocol_registry.h          # 协议注册表定义
+└── util.h                       # 工具函数
 ```

@@ -45,7 +45,7 @@ for flow in flows:
 | Network | IPv4, IPv6, ARP, ICMP, ICMPv6 |
 | Tunnel | GRE, VXLAN, MPLS |
 | Transport | TCP, UDP |
-| Application | TLS (SNI/ALPN/certs), DNS, HTTP, DHCP, DHCPv6 |
+| Application | TLS (SNI/ALPN/certs), DNS, HTTP, DHCP, DHCPv6, QUIC (Initial decryption, SNI/ALPN) |
 
 All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, MPLS) support recursive inner-packet dispatch.
 
@@ -65,6 +65,13 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 ## Documentation
 
 For detailed usage, API reference, and examples, see [docs/README.md](https://github.com/ljs-2002/wa1kpcap/blob/main/docs/README.md).
+
+## Roadmap
+
+- More application protocols (QUIC 0-RTT/Handshake decryption, HTTP/3, SSH, SMTP)
+- CLI tool for quick pcap inspection
+- Multi-process parallel parsing for large captures
+- Flow-level QUIC connection tracking and migration detection
 
 ## License
 

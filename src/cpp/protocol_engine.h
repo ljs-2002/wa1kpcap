@@ -161,6 +161,7 @@ private:
     void fill_gre(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_vxlan(NativeParsedPacket& pkt, const FieldMap& fm) const;
     void fill_mpls(NativeParsedPacket& pkt, const FieldMap& fm) const;
+    void fill_quic(NativeParsedPacket& pkt, const FieldMap& fm) const;
 
     // Fast-path: parse directly from buf into struct, bypassing FieldMap entirely.
     // Returns {bytes_consumed, next_protocol}. Returns {0, ""} if buf too short.
@@ -185,6 +186,7 @@ private:
     FastResult fast_parse_mpls(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_dhcp(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_dhcpv6(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_quic(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
 
     // Merge a single TLS parse result into pkt.tls (first-wins for most fields, accumulate handshake_types)
     void merge_tls(NativeParsedPacket& pkt, const NativeTLSInfo& src) const;

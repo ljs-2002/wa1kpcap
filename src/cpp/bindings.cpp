@@ -17,6 +17,7 @@
 #include "yaml_loader.h"
 #include "bpf_filter.h"
 #include "flow_buffer.h"
+#include "quic_crypto.h"
 
 // Safety: undef any remaining macros that leaked through
 #ifdef max
@@ -251,6 +252,28 @@ static py::object build_dataclass_from_struct(
             opts_raw, cc.empty_bytes);
     }
 
+    py::object quic = cc.none;
+    if (pkt.has_quic) {
+        py::object dcid = pkt.quic.dcid.empty()
+            ? cc.empty_bytes : py::bytes(pkt.quic.dcid);
+        py::object scid = pkt.quic.scid.empty()
+            ? cc.empty_bytes : py::bytes(pkt.quic.scid);
+        py::object token = pkt.quic.token.empty()
+            ? cc.empty_bytes : py::bytes(pkt.quic.token);
+        py::object sni = pkt.quic.sni.empty()
+            ? cc.none : py::cast(pkt.quic.sni);
+
+        quic = cc.QUICInfo_cls(
+            pkt.quic.is_long_header, pkt.quic.packet_type,
+            pkt.quic.version, dcid, scid,
+            pkt.quic.dcid_len, pkt.quic.scid_len,
+            token, pkt.quic.token_len,
+            pkt.quic.spin_bit, sni,
+            py::cast(pkt.quic.alpn), py::cast(pkt.quic.cipher_suites),
+            pkt.quic.version_str, pkt.quic.packet_type_str,
+            cc.empty_bytes);
+    }
+
     py::object raw_payload = pkt._raw_tcp_payload.empty()
         ? cc.empty_bytes : py::bytes(pkt._raw_tcp_payload);
 
@@ -297,7 +320,7 @@ static py::object build_dataclass_from_struct(
         cc.none, cc.none, cc.none, cc.none,
         raw_payload, flow_key_cache, extra_layers_py,
         arp, icmp6,
-        vlan, sll, sll2, gre, vxlan, mpls, dhcp, dhcpv6);
+        vlan, sll, sll2, gre, vxlan, mpls, dhcp, dhcpv6, quic);
 }
 
 // Standalone function for compute_array_stats (MSVC compatibility)
@@ -720,6 +743,30 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def_readwrite("transaction_id", &NativeDHCPv6Info::transaction_id)
         .def_readwrite("options_raw", &NativeDHCPv6Info::options_raw);
 
+    py::class_<NativeQUICInfo>(m, "NativeQUICInfo")
+        .def(py::init<>())
+        .def_readwrite("is_long_header", &NativeQUICInfo::is_long_header)
+        .def_readwrite("packet_type", &NativeQUICInfo::packet_type)
+        .def_readwrite("version", &NativeQUICInfo::version)
+        .def_property("dcid",
+            [](const NativeQUICInfo& self) { return py::bytes(self.dcid); },
+            [](NativeQUICInfo& self, py::bytes v) { self.dcid = std::string(v); })
+        .def_property("scid",
+            [](const NativeQUICInfo& self) { return py::bytes(self.scid); },
+            [](NativeQUICInfo& self, py::bytes v) { self.scid = std::string(v); })
+        .def_readwrite("dcid_len", &NativeQUICInfo::dcid_len)
+        .def_readwrite("scid_len", &NativeQUICInfo::scid_len)
+        .def_property("token",
+            [](const NativeQUICInfo& self) { return py::bytes(self.token); },
+            [](NativeQUICInfo& self, py::bytes v) { self.token = std::string(v); })
+        .def_readwrite("token_len", &NativeQUICInfo::token_len)
+        .def_readwrite("spin_bit", &NativeQUICInfo::spin_bit)
+        .def_readwrite("sni", &NativeQUICInfo::sni)
+        .def_readwrite("alpn", &NativeQUICInfo::alpn)
+        .def_readwrite("cipher_suites", &NativeQUICInfo::cipher_suites)
+        .def_readwrite("version_str", &NativeQUICInfo::version_str)
+        .def_readwrite("packet_type_str", &NativeQUICInfo::packet_type_str);
+
     py::class_<NativeParsedPacket>(m, "NativeParsedPacket")
         .def(py::init<>())
         .def_readwrite("timestamp", &NativeParsedPacket::timestamp)
@@ -832,6 +879,16 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
             [](NativeParsedPacket& self, py::object val) {
                 if (val.is_none()) { self.has_icmp6 = false; }
                 else { self.icmp6 = val.cast<NativeICMP6Info&>(); self.has_icmp6 = true; }
+            })
+        .def_property("quic",
+            [](py::object self_py) -> py::object {
+                auto& self = self_py.cast<NativeParsedPacket&>();
+                if (!self.has_quic) return py::none();
+                return py::cast(&self.quic, py::return_value_policy::reference_internal, self_py);
+            },
+            [](NativeParsedPacket& self, py::object val) {
+                if (val.is_none()) { self.has_quic = false; }
+                else { self.quic = val.cast<NativeQUICInfo&>(); self.has_quic = true; }
             })
         .def_readwrite("is_client_to_server", &NativeParsedPacket::is_client_to_server)
         .def_readwrite("packet_index", &NativeParsedPacket::packet_index)
@@ -1042,4 +1099,28 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
 
         return d;
     });
+
+    // ── QUIC crypto test helpers (for RFC 9001 test vectors) ──
+    m.def("quic_sha256", [](py::bytes data) {
+        std::string d = data;
+        auto hash = quic_crypto::sha256(
+            reinterpret_cast<const uint8_t*>(d.data()), d.size());
+        return py::bytes(reinterpret_cast<const char*>(hash.data()), hash.size());
+    }, "SHA-256 hash");
+
+    m.def("quic_hmac_sha256", [](py::bytes key, py::bytes data) {
+        std::string k = key, d = data;
+        auto mac = quic_crypto::hmac_sha256(
+            reinterpret_cast<const uint8_t*>(k.data()), k.size(),
+            reinterpret_cast<const uint8_t*>(d.data()), d.size());
+        return py::bytes(reinterpret_cast<const char*>(mac.data()), mac.size());
+    }, "HMAC-SHA256");
+
+    m.def("quic_hkdf_extract", [](py::bytes salt, py::bytes ikm) {
+        std::string s = salt, i = ikm;
+        auto prk = quic_crypto::hkdf_extract(
+            reinterpret_cast<const uint8_t*>(s.data()), s.size(),
+            reinterpret_cast<const uint8_t*>(i.data()), i.size());
+        return py::bytes(reinterpret_cast<const char*>(prk.data()), prk.size());
+    }, "HKDF-Extract (SHA-256)");
 }

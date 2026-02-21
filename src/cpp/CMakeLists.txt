@@ -19,6 +19,7 @@ set(NATIVE_SOURCES
     bindings.cpp
     pcap_reader.cpp
     protocol_engine.cpp
+    quic_crypto.cpp
     yaml_loader.cpp
     bpf_filter.cpp
     flow_buffer.cpp

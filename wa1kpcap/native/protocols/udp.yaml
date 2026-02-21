@@ -21,6 +21,7 @@ next_protocol:
   field: [dst_port, src_port]
   mapping:
     53: dns
+    443: quic
     4789: vxlan
     67: dhcp
     68: dhcp

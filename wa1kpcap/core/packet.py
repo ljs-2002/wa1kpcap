@@ -865,6 +865,83 @@ class DHCPv6Info(_SlottedInfoBase):
             self._raw = _raw
 
 
+class QUICInfo(_SlottedInfoBase):
+    """QUIC (RFC 9000/9001) protocol information.
+
+    Stores parsed fields from QUIC Long Header and Short Header packets.
+    For Initial packets, may also contain decrypted Client Hello fields
+    (SNI, ALPN, cipher_suites) if decryption succeeded.
+
+    Attributes:
+        is_long_header: True for Long Header packets, False for Short Header.
+        packet_type: Packet type (0=Initial, 1=0-RTT, 2=Handshake, 3=Retry).
+        version: QUIC version as integer (e.g. 0x00000001 for v1).
+        dcid: Destination Connection ID (raw bytes).
+        scid: Source Connection ID (raw bytes).
+        dcid_len: Length of DCID in bytes.
+        scid_len: Length of SCID in bytes.
+        token: Token from Initial packets (raw bytes).
+        token_len: Length of token in bytes.
+        spin_bit: Spin bit value (Short Header only).
+        sni: Server Name Indication (from decrypted Initial).
+        alpn: Application-Layer Protocol Negotiation list (from decrypted Initial).
+        cipher_suites: Cipher suites offered (from decrypted Initial).
+        version_str: Human-readable version string (e.g. "QUICv1").
+        packet_type_str: Human-readable packet type (e.g. "Initial", "1-RTT").
+    """
+    __slots__ = ('is_long_header', 'packet_type', 'version', 'dcid', 'scid',
+                 'dcid_len', 'scid_len', 'token', 'token_len',
+                 'spin_bit', 'sni', 'alpn', 'cipher_suites',
+                 'version_str', 'packet_type_str', '_raw')
+    _SLOT_NAMES = ('is_long_header', 'packet_type', 'version', 'dcid', 'scid',
+                   'dcid_len', 'scid_len', 'token', 'token_len',
+                   'spin_bit', 'sni', 'alpn', 'cipher_suites',
+                   'version_str', 'packet_type_str', '_raw')
+    _SLOT_DEFAULTS = (True, 0, 0, b'', b'', 0, 0, b'', 0,
+                      False, None, None, None, '', '', b'')
+
+    def __init__(self, is_long_header=True, packet_type=0, version=0,
+                 dcid=b'', scid=b'', dcid_len=0, scid_len=0,
+                 token=b'', token_len=0, spin_bit=False,
+                 sni=None, alpn=None, cipher_suites=None,
+                 version_str='', packet_type_str='',
+                 _raw=b"", fields: dict | None = None, **kwargs):
+        if fields is not None:
+            self.is_long_header = fields.get('is_long_header', True)
+            self.packet_type = fields.get('packet_type', 0)
+            self.version = fields.get('version', 0)
+            self.dcid = fields.get('dcid', b'')
+            self.scid = fields.get('scid', b'')
+            self.dcid_len = fields.get('dcid_len', 0)
+            self.scid_len = fields.get('scid_len', 0)
+            self.token = fields.get('token', b'')
+            self.token_len = fields.get('token_len', 0)
+            self.spin_bit = fields.get('spin_bit', False)
+            self.sni = fields.get('sni')
+            self.alpn = fields.get('alpn')
+            self.cipher_suites = fields.get('cipher_suites')
+            self.version_str = fields.get('version_str', '')
+            self.packet_type_str = fields.get('packet_type_str', '')
+            self._raw = fields.get('_raw', b"")
+        else:
+            self.is_long_header = is_long_header
+            self.packet_type = packet_type
+            self.version = version
+            self.dcid = dcid
+            self.scid = scid
+            self.dcid_len = dcid_len
+            self.scid_len = scid_len
+            self.token = token
+            self.token_len = token_len
+            self.spin_bit = spin_bit
+            self.sni = sni
+            self.alpn = alpn
+            self.cipher_suites = cipher_suites
+            self.version_str = version_str
+            self.packet_type_str = packet_type_str
+            self._raw = _raw
+
+
 # Map from short property names to layer registry names
 _PROTO_KEY_TO_LAYER = {
     'eth': 'ethernet', 'ip': 'ipv4', 'ip6': 'ipv6',
@@ -873,6 +950,7 @@ _PROTO_KEY_TO_LAYER = {
     'arp': 'arp', 'icmp6': 'icmpv6',
     'vlan': 'vlan', 'sll': 'linux_sll', 'sll2': 'linux_sll2',
     'gre': 'gre', 'vxlan': 'vxlan', 'mpls': 'mpls', 'dhcp': 'dhcp', 'dhcpv6': 'dhcpv6',
+    'quic': 'quic',
 }
 
 
@@ -901,7 +979,7 @@ class ParsedPacket:
                  _raw_tcp_payload=b"", _flow_key_cache=None, extra_layers=None,
                  arp=None, icmp6=None,
                  vlan=None, sll=None, sll2=None, gre=None, vxlan=None, mpls=None,
-                 dhcp=None, dhcpv6=None):
+                 dhcp=None, dhcpv6=None, quic=None):
         self.timestamp = timestamp
         self.raw_data = raw_data
         self.link_layer_type = link_layer_type
@@ -928,7 +1006,7 @@ class ParsedPacket:
                          ('arp', arp), ('icmp6', icmp6),
                          ('vlan', vlan), ('sll', sll), ('sll2', sll2),
                          ('gre', gre), ('vxlan', vxlan), ('mpls', mpls),
-                         ('dhcp', dhcp), ('dhcpv6', dhcpv6)):
+                         ('dhcp', dhcp), ('dhcpv6', dhcpv6), ('quic', quic)):
             if val is not None:
                 self.layers[_PROTO_KEY_TO_LAYER[key]] = val
 
@@ -1095,6 +1173,14 @@ class ParsedPacket:
     def dhcpv6(self, v):
         if v is not None: self.layers['dhcpv6'] = v
         else: self.layers.pop('dhcpv6', None)
+
+    @property
+    def quic(self) -> QUICInfo | None:
+        return self.layers.get('quic')
+    @quic.setter
+    def quic(self, v):
+        if v is not None: self.layers['quic'] = v
+        else: self.layers.pop('quic', None)
 
     def get_layer(self, name: str) -> ProtocolInfo | None:
         """Get a protocol layer by registry name."""

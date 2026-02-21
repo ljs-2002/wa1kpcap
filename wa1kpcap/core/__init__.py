@@ -24,6 +24,7 @@ from wa1kpcap.core.packet import (
     MPLSInfo,
     DHCPInfo,
     DHCPv6Info,
+    QUICInfo,
 )
 from wa1kpcap.core.reader import PcapReader, LinkLayerType
 
@@ -55,6 +56,7 @@ __all__ = [
     'MPLSInfo',
     'DHCPInfo',
     'DHCPv6Info',
+    'QUICInfo',
     'PcapReader',
     'LinkLayerType',
 ]

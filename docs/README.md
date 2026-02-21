@@ -475,4 +475,19 @@ wa1kpcap/
 │   ├── extractor.py         # FeatureExtractor, FlowFeatures
 │   └── registry.py          # Feature registry
 └── exporters.py             # DataFrame/CSV/JSON export
+
+src/cpp/                         # C++ native engine
+├── bindings.cpp                 # pybind11 Python bindings
+├── pcap_reader.cpp/h            # PCAP/PCAPNG reader
+├── protocol_engine.cpp/h        # Protocol parsing engine + fast-path parsers
+├── yaml_loader.cpp/h            # YAML protocol definition loader
+├── quic_crypto.cpp/h            # QUIC Initial decryption (SHA-256, HKDF, AES-128-GCM)
+├── hardcoded_parsers.cpp/h      # Hardcoded protocol parsers (DNS, etc.)
+├── bpf_filter.cpp/h             # BPF filter compiler
+├── expression_eval.cpp/h        # Expression evaluator for YAML conditions
+├── flow_buffer.cpp/h            # TCP stream reassembly buffer
+├── parsed_packet.h              # NativeParsedPacket struct definitions
+├── field_value.h                # FieldValue variant type
+├── protocol_registry.h          # Protocol registry definitions
+└── util.h                       # Utility functions
 ```

@@ -261,6 +261,10 @@ class Flow:
     _verbose: bool = True
     _save_raw: bool = False
 
+    # QUIC flow state (for Short Header identification)
+    _is_quic: bool = False
+    _quic_dcid_len: int = 0
+
     # Incremental feature accumulation (populated by add_packet)
     _seq_packet_lengths: list = field(default_factory=list)
     _seq_ip_lengths: list = field(default_factory=list)

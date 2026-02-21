@@ -28,4 +28,5 @@
     X(VXLAN,    vxlan, NativeVXLANInfo,    "VXLANInfo")    \
     X(MPLS,     mpls,  NativeMPLSInfo,     "MPLSInfo")     \
     X(DHCP,     dhcp,  NativeDHCPInfo,     "DHCPInfo")     \
-    X(DHCPv6,   dhcpv6, NativeDHCPv6Info,  "DHCPv6Info")
+    X(DHCPv6,   dhcpv6, NativeDHCPv6Info,  "DHCPv6Info")  \
+    X(QUIC,     quic,  NativeQUICInfo,     "QUICInfo")

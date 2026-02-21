@@ -45,7 +45,7 @@ for flow in flows:
 | 网络层 | IPv4, IPv6, ARP, ICMP, ICMPv6 |
 | 隧道层 | GRE, VXLAN, MPLS |
 | 传输层 | TCP, UDP |
-| 应用层 | TLS (SNI/ALPN/证书), DNS, HTTP, DHCP, DHCPv6 |
+| 应用层 | TLS (SNI/ALPN/证书), DNS, HTTP, DHCP, DHCPv6, QUIC (Initial 解密, SNI/ALPN) |
 
 所有协议均有 C++ 快速路径实现。隧道协议（GRE、VXLAN、MPLS）支持递归内层包分发。
 
@@ -65,6 +65,13 @@ for flow in flows:
 ## 文档
 
 详细用法、API 参考和示例请参阅 [docs/README_CN.md](https://github.com/ljs-2002/wa1kpcap/blob/main/docs/README_CN.md)。
+
+## 路线图
+
+- 更多应用层协议（QUIC 0-RTT/Handshake 解密、HTTP/3、SSH、SMTP）
+- CLI 命令行工具，快速检查 pcap 文件
+- 多进程并行解析，处理大规模抓包文件
+- 流级 QUIC 连接跟踪与迁移检测
 
 ## 许可证
 

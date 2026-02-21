@@ -437,6 +437,9 @@ class Wa1kPcap:
                 if pkt.tcp and hasattr(pkt, '_raw_tcp_payload'):
                     self._handle_tcp_reassembly(pkt, flow)
 
+                # QUIC flow state: mark flow on Long Header, parse Short Header
+                self._handle_quic_flow_state(pkt, flow)
+
                 # Add packet to flow
                 flow.add_packet(pkt)
 
@@ -596,6 +599,9 @@ class Wa1kPcap:
         # Handle TCP stream reassembly and application layer parsing
         if pkt.tcp and hasattr(pkt, '_raw_tcp_payload'):
             self._handle_tcp_reassembly(pkt, flow)
+
+        # QUIC flow state: mark flow on Long Header, parse Short Header
+        self._handle_quic_flow_state(pkt, flow)
 
         # Add packet to flow
         flow.add_packet(pkt)
@@ -1009,6 +1015,68 @@ class Wa1kPcap:
             return (pkt.ip6.src == flow.key.src_ip and
                     (pkt.tcp.sport if pkt.tcp else 0) == flow.key.src_port)
         return True
+
+    def _handle_quic_flow_state(self, pkt, flow) -> None:
+        """Track QUIC flow state and parse Short Header packets.
+
+        When a QUIC Long Header (Initial) is seen, mark the flow as QUIC
+        and record the DCID length. For subsequent UDP packets on the same
+        flow that weren't identified as QUIC, try to parse as Short Header.
+        """
+        from wa1kpcap.core.packet import QUICInfo
+
+        q = pkt.quic
+        if q is not None and q.is_long_header:
+            # Long Header seen — mark flow as QUIC
+            flow._is_quic = True
+            if q.dcid_len > 0:
+                flow._quic_dcid_len = q.dcid_len
+            return
+
+        if q is not None:
+            # Already parsed as QUIC (shouldn't happen for short header yet, but guard)
+            return
+
+        # Not identified as QUIC — check if this is a UDP packet on a QUIC flow
+        if not flow._is_quic or not pkt.udp:
+            return
+
+        # Try to parse as QUIC Short Header (1-RTT)
+        raw = pkt.raw_data
+        if not raw:
+            return
+
+        # Compute UDP payload offset: link + IP + UDP(8)
+        # Use the stored lengths from parsing
+        udp_payload_offset = pkt.caplen - pkt.app_len
+        if udp_payload_offset < 0 or pkt.app_len < 2:
+            return
+
+        buf = raw[udp_payload_offset:] if isinstance(raw, (bytes, memoryview)) else bytes(raw)[udp_payload_offset:]
+        if len(buf) < 2:
+            return
+
+        first = buf[0]
+        # Short Header: bit 7 = 0, Fixed Bit (bit 6) = 1
+        if (first & 0x80) != 0 or (first & 0x40) == 0:
+            return
+
+        # Parse spin bit (bit 5)
+        spin_bit = bool(first & 0x20)
+
+        # Extract DCID using known length from flow state
+        dcid_len = flow._quic_dcid_len
+        if len(buf) < 1 + dcid_len:
+            return
+        dcid = bytes(buf[1:1 + dcid_len])
+
+        pkt.quic = QUICInfo(
+            is_long_header=False,
+            spin_bit=spin_bit,
+            dcid=dcid,
+            dcid_len=dcid_len,
+            packet_type_str="1-RTT",
+        )
 
     def _handle_tcp_reassembly(self, pkt: ParsedPacket, flow: Flow) -> None:
         """Handle TCP stream reassembly and application layer parsing.

@@ -193,6 +193,37 @@ struct NativeDHCPv6Info {
     std::vector<uint8_t> options_raw; // Raw options bytes for user-side parsing
 };
 
+struct NativeQUICInfo {
+    // Header form
+    bool is_long_header = true;
+
+    // Long Header fields
+    int64_t packet_type = 0;      // 0=Initial, 1=0-RTT, 2=Handshake, 3=Retry
+    int64_t version = 0;          // e.g. 0x00000001 for QUIC v1
+    std::string dcid;             // Destination Connection ID (raw bytes)
+    std::string scid;             // Source Connection ID (raw bytes)
+    int64_t dcid_len = 0;
+    int64_t scid_len = 0;
+
+    // Initial-specific
+    std::string token;            // Token (Initial packets, raw bytes)
+    int64_t token_len = 0;
+
+    // Short Header fields
+    bool spin_bit = false;
+
+    // From Initial decryption (Client Hello)
+    std::string sni;
+    std::vector<std::string> alpn;
+    std::vector<int64_t> cipher_suites;
+
+    // Human-readable version string
+    std::string version_str;      // e.g. "QUICv1", "QUICv2"
+
+    // Packet type string
+    std::string packet_type_str;  // e.g. "Initial", "Handshake", "0-RTT", "Retry", "1-RTT"
+};
+
 struct NativeParsedPacket {
     double timestamp = 0.0;
     std::string raw_data;         // stored as py::bytes

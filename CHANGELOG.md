@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.2 (2026-02-21)
+
+### New Features
+
+- QUIC protocol support: Long Header parsing (Initial, Handshake, 0-RTT, Retry) with C++ fast-path
+- QUIC Initial packet decryption: zero-dependency embedded crypto (SHA-256, HMAC-SHA256, HKDF, AES-128-GCM)
+- Extract SNI, ALPN, and cipher_suites from QUIC Initial Client Hello via decryption + TLS handshake parsing
+- QUIC Short Header (1-RTT) identification via flow state: spin bit and DCID extraction
+- QUICInfo dataclass with full field support (version, dcid, scid, token, spin_bit, sni, alpn, cipher_suites)
+- Python bindings for crypto primitives (quic_sha256, quic_hmac_sha256, quic_hkdf_extract) for testing
+
+### Tests
+
+- 22 new QUIC tests: QUICInfo class, Long Header struct parsing, Short Header flow-state identification, RFC 9001 crypto test vectors
+
+### Documentation
+
+- Add QUIC to supported protocols in README (EN/CN)
+- Add Roadmap section to README (EN/CN)
+- Add C++ source tree to project structure in docs (EN/CN)
+
 ## v0.1.1 (2026-02-21)
 
 ### Bug Fixes

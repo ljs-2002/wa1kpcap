@@ -12,6 +12,7 @@ from wa1kpcap.core.packet import (
     TCPInfo, UDPInfo, DNSInfo, TLSInfo,
     ARPInfo, ICMPInfo, ICMP6Info,
     VLANInfo, SLLInfo, SLL2Info, GREInfo, VXLANInfo, MPLSInfo, DHCPInfo, DHCPv6Info,
+    QUICInfo,
     ProtocolInfo, ProtocolRegistry,
 )
 
@@ -250,6 +251,27 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
             options_raw=dhcpv6.get("options_raw", b""),
         )
 
+    # ── QUIC ──
+    quic = d.get("quic")
+    if quic and isinstance(quic, dict):
+        pkt.quic = QUICInfo(
+            is_long_header=quic.get("is_long_header", True),
+            packet_type=quic.get("packet_type", 0),
+            version=quic.get("version", 0),
+            dcid=quic.get("dcid", b""),
+            scid=quic.get("scid", b""),
+            dcid_len=quic.get("dcid_len", 0),
+            scid_len=quic.get("scid_len", 0),
+            token=quic.get("token", b""),
+            token_len=quic.get("token_len", 0),
+            spin_bit=quic.get("spin_bit", False),
+            sni=quic.get("sni"),
+            alpn=quic.get("alpn"),
+            cipher_suites=quic.get("cipher_suites"),
+            version_str=quic.get("version_str", ""),
+            packet_type_str=quic.get("packet_type_str", ""),
+        )
+
     # ── TLS ──
     tls_record = d.get("tls_record")
     if tls_record and isinstance(tls_record, dict):
@@ -289,6 +311,7 @@ def dict_to_parsed_packet(d: dict, timestamp: float, raw_data: bytes,
         'ethernet', 'ipv4', 'ipv6', 'tcp', 'udp', 'dns',
         'arp', 'icmp', 'icmpv6',
         'vlan', 'linux_sll', 'linux_sll2', 'gre', 'vxlan', 'mpls', 'dhcp', 'dhcpv6',
+        'quic',
         'tls_record', 'tls_handshake', 'tls_client_hello',
         'tls_server_hello', 'tls_certificate', 'tls_stream',
         '_raw_tcp_payload', '_raw_data', '_link_type', 'app_len',
