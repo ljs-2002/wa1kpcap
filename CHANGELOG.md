@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.3 (2026-02-22)
+
+### Bug Fixes
+
+- Replace port-based QUIC routing (`443: quic`) with payload heuristic detection, preventing gQUIC/DTLS from being misidentified as IETF QUIC
+- Fix Short Header packets being misidentified as Long Header (version=0) by slow path `fill_quic`
+- Fix QUIC CRYPTO frame reassembly: support offset-aware intra-packet sorting and cross-packet fragment collection for complete ClientHello extraction
+
+### Improvements
+
+- Improve flow-level QUIC aggregation: remove per-packet fields (`is_long_header`, `packet_type`, `token`, `spin_bit`), add server SCID aggregation from first responding Initial packet
+- Add `flow.quic` property accessor on Flow class
+
+### Tests
+
+- Add QUIC integration tests using real pcap (test/quic2.pcap): flow count, SNI extraction, ALPN, cipher suites, known SNI values
+- Update existing QUIC tests for corrected Short Header behavior
+
 ## v0.1.2 (2026-02-21)
 
 ### New Features
