@@ -8,7 +8,7 @@
 
 [English](https://github.com/ljs-2002/wa1kpcap/blob/main/README.md)
 
-高性能 PCAP 分析库。基于原生 C++ 解析引擎，从网络流量捕获文件中提取多维度流级特征和各层协议字段。
+快速 PCAP 分析库。基于原生 C++ 解析引擎，从网络流量捕获文件中提取多维度流级特征和各层协议字段。
 
 ## 安装
 
@@ -51,7 +51,7 @@ for flow in flows:
 
 ## 功能特性
 
-- 高性能 C++ 原生解析引擎，提供 Python API，同时支持 dpkt 作为备选引擎（`pip install wa1kpcap[dpkt]`）
+- 快速 C++ 原生解析引擎，提供 Python API，同时支持 dpkt 作为备选引擎（`pip install wa1kpcap[dpkt]`）
 - 流级特征提取，带符号方向性包长度
 - 每流 8 种序列特征：packet_lengths、ip_lengths、trans_lengths、app_lengths、timestamps、iats、tcp_flags、tcp_window_sizes
 - 统计聚合：mean、std、var、min、max、range、median、skew、kurt、cv，以及上行/下行方向性统计

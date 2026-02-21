@@ -8,7 +8,7 @@
 
 [中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
 
-High-performance PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, powered by a native C++ parsing engine.
+Fast PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, with a native C++ parsing engine.
 
 ## Installation
 
@@ -51,7 +51,7 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 
 ## Features
 
-- High-performance C++ native parsing engine with Python API, also supports dpkt as alternative engine (`pip install wa1kpcap[dpkt]`)
+- Fast C++ native parsing engine with Python API, also supports dpkt as alternative engine (`pip install wa1kpcap[dpkt]`)
 - Flow-level feature extraction with signed directional packet lengths
 - 8 sequence features per flow: packet_lengths, ip_lengths, trans_lengths, app_lengths, timestamps, iats, tcp_flags, tcp_window_sizes
 - Statistical aggregation: mean, std, var, min, max, range, median, skew, kurt, cv, plus up/down directional breakdowns
