@@ -301,6 +301,7 @@ for flow in flows:
         print(f"SNI: {flow.tls.sni}")
         print(f"ALPN: {flow.tls.alpn}")
         if flow.tls.certificate:
+            # 需要安装 wa1kpcap[crypto]；未安装时 certificate 为原始 DER 字节
             cert = flow.tls.certificate
             print(f"主题: {cert.get('subject')}")
             print(f"颁发者: {cert.get('issuer')}")

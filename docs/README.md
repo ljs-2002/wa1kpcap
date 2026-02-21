@@ -301,6 +301,7 @@ for flow in flows:
         print(f"SNI: {flow.tls.sni}")
         print(f"ALPN: {flow.tls.alpn}")
         if flow.tls.certificate:
+            # Requires wa1kpcap[crypto]; without it, certificate is raw DER bytes
             cert = flow.tls.certificate
             print(f"Subject: {cert.get('subject')}")
             print(f"Issuer: {cert.get('issuer')}")
