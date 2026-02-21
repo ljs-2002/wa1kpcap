@@ -292,6 +292,8 @@ Key points:
 
 ### TLS
 
+SNI, ALPN, and version are always available. Certificate fields (`subject`, `issuer`, `not_before`, etc.) require `pip install wa1kpcap[crypto]`. Without it, `flow.tls.certificates` contains raw DER bytes that you can parse yourself.
+
 ```python
 for flow in flows:
     if flow.tls:

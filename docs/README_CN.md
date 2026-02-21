@@ -292,6 +292,8 @@ for flow in flows:
 
 ### TLS
 
+SNI、ALPN 和版本信息始终可用。证书详细字段（`subject`、`issuer`、`not_before` 等）需要安装 `pip install wa1kpcap[crypto]`。未安装时，`flow.tls.certificates` 包含原始 DER 字节，可自行解析。
+
 ```python
 for flow in flows:
     if flow.tls:

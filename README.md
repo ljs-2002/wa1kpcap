@@ -1,6 +1,6 @@
 # wa1kpcap
 
-[中文文档](README_CN.md)
+[中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
 
 Dual-engine PCAP analysis library for Python. Extracts flow-level features and protocol fields from network traffic captures using a native C++ engine (default) or dpkt as fallback.
 
@@ -58,7 +58,7 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 
 ## Documentation
 
-For detailed usage, API reference, and examples, see [docs/README.md](docs/README.md).
+For detailed usage, API reference, and examples, see [docs/README.md](https://github.com/ljs-2002/wa1kpcap/blob/main/docs/README.md).
 
 ## License
 

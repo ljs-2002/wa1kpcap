@@ -1,6 +1,6 @@
 # wa1kpcap
 
-[English](README.md)
+[English](https://github.com/ljs-2002/wa1kpcap/blob/main/README.md)
 
 Python 双引擎 PCAP 分析库。使用原生 C++ 引擎（默认）或 dpkt 作为后备，从网络流量捕获文件中提取流级特征和协议字段。
 
@@ -58,7 +58,7 @@ for flow in flows:
 
 ## 文档
 
-详细用法、API 参考和示例请参阅 [docs/README_CN.md](docs/README_CN.md)。
+详细用法、API 参考和示例请参阅 [docs/README_CN.md](https://github.com/ljs-2002/wa1kpcap/blob/main/docs/README_CN.md)。
 
 ## 许可证
 
