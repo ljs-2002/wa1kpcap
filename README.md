@@ -1,5 +1,11 @@
 # wa1kpcap
 
+[![PyPI](https://img.shields.io/pypi/v/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
+[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
+[![License](https://img.shields.io/pypi/l/wa1kpcap)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
+[![Tests](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml/badge.svg)](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://pypi.org/project/wa1kpcap/)
+
 [中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
 
 High-performance PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, powered by a native C++ parsing engine.

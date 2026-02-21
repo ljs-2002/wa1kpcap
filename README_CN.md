@@ -1,5 +1,11 @@
 # wa1kpcap
 
+[![PyPI](https://img.shields.io/pypi/v/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
+[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
+[![License](https://img.shields.io/pypi/l/wa1kpcap)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
+[![Tests](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml/badge.svg)](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://pypi.org/project/wa1kpcap/)
+
 [English](https://github.com/ljs-2002/wa1kpcap/blob/main/README.md)
 
 高性能 PCAP 分析库。基于原生 C++ 解析引擎，从网络流量捕获文件中提取多维度流级特征和各层协议字段。
