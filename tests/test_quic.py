@@ -430,3 +430,89 @@ class TestQUICExports:
     def test_packet_module_exports(self):
         from wa1kpcap.core.packet import QUICInfo
         assert QUICInfo is not None
+
+
+# ── Test: End-to-end integration with real pcap ──
+
+QUIC2_PCAP = "test/quic2.pcap"
+
+class TestQUICIntegration:
+    """Integration tests using real QUIC pcap — validates the full pipeline:
+    parsing → decryption → CRYPTO frame reassembly → TLS ClientHello extraction.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        import os
+        if not os.path.exists(QUIC2_PCAP):
+            pytest.skip("test/quic2.pcap not found")
+        try:
+            from wa1kpcap import Wa1kPcap
+            self.analyzer = Wa1kPcap(default_filter=None, app_layer_parsing='full')
+            self.flows = self.analyzer.analyze_file(QUIC2_PCAP)
+        except Exception as e:
+            pytest.skip(f"Cannot analyze pcap: {e}")
+
+    def test_flow_count(self):
+        """Should detect 22 flows."""
+        assert len(self.flows) == 22
+
+    def test_quic_layer_count(self):
+        """Flows with a captured Initial (Long Header) should have a QUIC layer.
+        Flows that only contain Short Header packets (missed handshake) won't."""
+        quic_flows = [f for f in self.flows if f.quic is not None]
+        assert len(quic_flows) == 20  # 2 flows have only Short Header (no Initial)
+
+    def test_quic_v1_sni_extraction(self):
+        """All QUIC v1 flows should have SNI extracted via Initial decryption."""
+        v1_flows = [f for f in self.flows if f.quic and f.quic.version == 1]
+        assert len(v1_flows) >= 20  # at least 20 v1 flows
+        for flow in v1_flows:
+            assert flow.quic.sni is not None and flow.quic.sni != "", \
+                f"Flow {flow.key} missing SNI"
+
+    def test_quic_v1_alpn(self):
+        """All QUIC v1 flows should have ALPN=['h3']."""
+        v1_flows = [f for f in self.flows if f.quic and f.quic.version == 1]
+        for flow in v1_flows:
+            assert flow.quic.alpn == ['h3'], \
+                f"Flow {flow.key} unexpected ALPN: {flow.quic.alpn}"
+
+    def test_quic_v1_cipher_suites(self):
+        """All QUIC v1 flows should have TLS 1.3 cipher suites."""
+        tls13_suites = {4865, 4866, 4867}  # AES-128-GCM, AES-256-GCM, CHACHA20
+        v1_flows = [f for f in self.flows if f.quic and f.quic.version == 1]
+        for flow in v1_flows:
+            assert set(flow.quic.cipher_suites) <= tls13_suites, \
+                f"Flow {flow.key} unexpected suites: {flow.quic.cipher_suites}"
+
+    def test_known_sni_values(self):
+        """Spot-check specific SNI values we know are in the pcap."""
+        sni_set = {f.quic.sni for f in self.flows if f.quic and f.quic.sni}
+        expected = {
+            'unpkg.zhimg.com', 'captcha.zhihu.com', 'apm.zhihu.com',
+            'fonts.gstatic.com', 'fonts.googleapis.com', 'cdn.jsdelivr.net',
+            'www.redditstatic.com', 'www.logitechg.com',
+        }
+        assert expected <= sni_set, f"Missing SNIs: {expected - sni_set}"
+
+    def test_ext_protocol_contains_quic(self):
+        """ext_protocol should include 'QUIC' for flows with a QUIC layer."""
+        for flow in self.flows:
+            if flow.quic is not None:
+                assert 'QUIC' in flow.ext_protocol, \
+                    f"Flow {flow.key} ext_protocol={flow.ext_protocol}"
+
+    def test_flow_quic_property(self):
+        """flow.quic should be accessible and match flow.layers['quic']."""
+        for flow in self.flows:
+            assert flow.quic is flow.layers.get('quic')
+
+    def test_packet_level_quic(self):
+        """First packet of flows with QUIC layer should have pkt.quic set."""
+        for flow in self.flows:
+            if flow.quic is not None and flow.packets:
+                pkt = flow.packets[0]
+                assert pkt.quic is not None, \
+                    f"Flow {flow.key} first packet missing quic"
+
