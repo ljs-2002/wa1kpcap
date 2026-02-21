@@ -2,7 +2,7 @@
 
 [中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
 
-Dual-engine PCAP analysis library for Python. Extracts flow-level features and protocol fields from network traffic captures using a native C++ engine (default) or dpkt as fallback.
+High-performance PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, powered by a native C++ parsing engine.
 
 ## Installation
 
@@ -45,16 +45,16 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 
 ## Features
 
-- Dual engine: native C++ (default) or dpkt fallback
-- Flow-level feature extraction with signed directional lengths
+- High-performance C++ native parsing engine with Python API, also supports dpkt as alternative engine (`pip install wa1kpcap[dpkt]`)
+- Flow-level feature extraction with signed directional packet lengths
 - 8 sequence features per flow: packet_lengths, ip_lengths, trans_lengths, app_lengths, timestamps, iats, tcp_flags, tcp_window_sizes
-- Statistical aggregation: mean, std, var, min, max, range, median, skew, kurt, cv, plus directional breakdowns
+- Statistical aggregation: mean, std, var, min, max, range, median, skew, kurt, cv, plus up/down directional breakdowns
+- Multi-layer protocol field extraction from link layer to application layer
 - BPF filter with protocol-aware keywords (dhcp, dhcpv6, vlan, gre, vxlan, mpls)
-- Application layer parsing control: full / port_only / none
-- IP/TCP/TLS reassembly
+- IP fragment, TCP stream, and TLS record reassembly
 - Export to DataFrame, CSV, JSON
 - Custom incremental feature registration
-- YAML-based protocol extension
+- YAML-based protocol extension for adding new protocols without C++ code
 
 ## Documentation
 
