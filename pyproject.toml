@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "wa1kpcap"
 version = "0.1.2"
-description = "Fast PCAP analysis library — extract flow-level features and multi-layer protocol fields from network traffic captures"
+description = "Efficient, extensible, out-of-the-box PCAP analysis library — extract flow-level features and multi-layer protocol fields from network traffic captures"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

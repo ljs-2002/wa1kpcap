@@ -8,7 +8,7 @@
 
 [中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
 
-Fast PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, with a native C++ parsing engine.
+Efficient, extensible, out-of-the-box PCAP analysis library for Python. Extracts multi-level flow features and protocol fields across all layers from network traffic captures, powered by a C++ engine.
 
 ## Installation
 
