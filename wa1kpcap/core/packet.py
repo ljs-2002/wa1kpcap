@@ -892,7 +892,7 @@ class QUICInfo(_SlottedInfoBase):
     __slots__ = ('is_long_header', 'packet_type', 'version', 'dcid', 'scid',
                  'dcid_len', 'scid_len', 'token', 'token_len',
                  'spin_bit', 'sni', 'alpn', 'cipher_suites',
-                 'version_str', 'packet_type_str', '_raw')
+                 'version_str', 'packet_type_str', '_raw', 'crypto_fragments')
     _SLOT_NAMES = ('is_long_header', 'packet_type', 'version', 'dcid', 'scid',
                    'dcid_len', 'scid_len', 'token', 'token_len',
                    'spin_bit', 'sni', 'alpn', 'cipher_suites',
@@ -923,6 +923,7 @@ class QUICInfo(_SlottedInfoBase):
             self.version_str = fields.get('version_str', '')
             self.packet_type_str = fields.get('packet_type_str', '')
             self._raw = fields.get('_raw', b"")
+            self.crypto_fragments = []
         else:
             self.is_long_header = is_long_header
             self.packet_type = packet_type
@@ -940,6 +941,32 @@ class QUICInfo(_SlottedInfoBase):
             self.version_str = version_str
             self.packet_type_str = packet_type_str
             self._raw = _raw
+            self.crypto_fragments = []
+
+    # Per-packet fields that should not be aggregated to flow level
+    _MERGE_SKIP = frozenset(('is_long_header', 'packet_type', 'packet_type_str',
+                             'token', 'token_len', 'spin_bit'))
+
+    def merge(self, other) -> None:
+        for k in self._SLOT_NAMES:
+            if k in self._MERGE_SKIP:
+                continue
+            cur = getattr(self, k)
+            if cur is None:
+                v = getattr(other, k, None)
+                if v is not None:
+                    setattr(self, k, v)
+
+    def copy(self):
+        obj = super().copy()
+        # Reset per-packet fields to None so they don't appear at flow level
+        obj.is_long_header = None
+        obj.packet_type = None
+        obj.packet_type_str = None
+        obj.token = None
+        obj.token_len = None
+        obj.spin_bit = None
+        return obj
 
 
 # Map from short property names to layer registry names

@@ -315,6 +315,14 @@ class Flow:
         if v is not None: self.layers['dns'] = v
         else: self.layers.pop('dns', None)
 
+    @property
+    def quic(self):
+        return self.layers.get('quic')
+    @quic.setter
+    def quic(self, v):
+        if v is not None: self.layers['quic'] = v
+        else: self.layers.pop('quic', None)
+
     def register_incremental_feature(self, name: str, processor) -> None:
         """
         Register an incremental feature processor for this flow.

@@ -272,6 +272,15 @@ static py::object build_dataclass_from_struct(
             py::cast(pkt.quic.alpn), py::cast(pkt.quic.cipher_suites),
             pkt.quic.version_str, pkt.quic.packet_type_str,
             cc.empty_bytes);
+
+        // Attach CRYPTO fragments for cross-packet reassembly
+        if (!pkt.quic.crypto_fragments.empty()) {
+            py::list frags;
+            for (const auto& f : pkt.quic.crypto_fragments) {
+                frags.append(py::make_tuple(f.first, py::bytes(f.second)));
+            }
+            quic.attr("crypto_fragments") = frags;
+        }
     }
 
     py::object raw_payload = pkt._raw_tcp_payload.empty()
@@ -765,7 +774,24 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def_readwrite("alpn", &NativeQUICInfo::alpn)
         .def_readwrite("cipher_suites", &NativeQUICInfo::cipher_suites)
         .def_readwrite("version_str", &NativeQUICInfo::version_str)
-        .def_readwrite("packet_type_str", &NativeQUICInfo::packet_type_str);
+        .def_readwrite("packet_type_str", &NativeQUICInfo::packet_type_str)
+        .def_property("crypto_fragments",
+            [](const NativeQUICInfo& self) {
+                py::list result;
+                for (const auto& f : self.crypto_fragments) {
+                    result.append(py::make_tuple(f.first, py::bytes(f.second)));
+                }
+                return result;
+            },
+            [](NativeQUICInfo& self, py::list v) {
+                self.crypto_fragments.clear();
+                for (auto item : v) {
+                    auto t = item.cast<py::tuple>();
+                    self.crypto_fragments.emplace_back(
+                        t[0].cast<uint64_t>(),
+                        std::string(t[1].cast<py::bytes>()));
+                }
+            });
 
     py::class_<NativeParsedPacket>(m, "NativeParsedPacket")
         .def(py::init<>())
@@ -937,6 +963,11 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
              py::arg("app_layer_mode") = 0)
         .def("parse_tls_record", &NativeParser::parse_tls_record,
              py::arg("buf"))
+        .def("parse_from_protocol", [](NativeParser& self, py::bytes buf, const std::string& protocol) {
+             std::string s = buf;
+             return self.engine().parse_from_protocol_struct(
+                 reinterpret_cast<const uint8_t*>(s.data()), s.size(), protocol);
+             }, py::arg("buf"), py::arg("protocol"))
         .def("load_extra_file", &NativeParser::load_extra_file,
              py::arg("file_path"))
         .def("add_protocol_routing", &NativeParser::add_protocol_routing,
@@ -1123,4 +1154,16 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
             reinterpret_cast<const uint8_t*>(i.data()), i.size());
         return py::bytes(reinterpret_cast<const char*>(prk.data()), prk.size());
     }, "HKDF-Extract (SHA-256)");
+
+    m.def("quic_decrypt_initial", [](py::bytes packet) {
+        std::string p = packet;
+        auto result = quic_crypto::decrypt_initial_packet(
+            reinterpret_cast<const uint8_t*>(p.data()), p.size());
+        py::dict d;
+        d["success"] = result.success;
+        d["plaintext"] = py::bytes(
+            reinterpret_cast<const char*>(result.plaintext.data()),
+            result.plaintext.size());
+        return d;
+    }, "Decrypt QUIC Initial packet");
 }

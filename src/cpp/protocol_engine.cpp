@@ -1356,6 +1356,14 @@ std::string ProtocolEngine::yaml_next_protocol_lookup(
     return {};
 }
 
+// ── QUIC version constants (needed by fast_parse_udp heuristic) ──
+static const uint32_t QUIC_V1 = 0x00000001;
+static const uint32_t QUIC_V2 = 0x6b3343cf;
+
+static bool is_quic_version(uint32_t ver) {
+    return ver == QUIC_V1 || ver == QUIC_V2;
+}
+
 ProtocolEngine::FastResult ProtocolEngine::fast_parse_ethernet(
     const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
 {
@@ -1608,6 +1616,22 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_udp(
             case 547: next = "dhcpv6"; break;
         }
     }
+
+    // QUIC heuristic: check UDP payload for IETF QUIC Long Header
+    // (bit 7=1, followed by a known QUIC version)
+    if (next.empty() && app_len >= 5) {
+        const uint8_t* payload = buf + 8;
+        if ((payload[0] & 0x80) != 0) {
+            uint32_t ver = (static_cast<uint32_t>(payload[1]) << 24) |
+                           (static_cast<uint32_t>(payload[2]) << 16) |
+                           (static_cast<uint32_t>(payload[3]) << 8)  |
+                           static_cast<uint32_t>(payload[4]);
+            if (is_quic_version(ver)) {
+                next = "quic";
+            }
+        }
+    }
+
     if (next.empty()) next = yaml_next_protocol_lookup("udp", udp.dport);
     if (next.empty()) next = yaml_next_protocol_lookup("udp", udp.sport);
     return {8, std::move(next)};
@@ -2018,19 +2042,12 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_dhcpv6(
 }
 
 // ── QUIC version constants ──
-static const uint32_t QUIC_V1 = 0x00000001;
-static const uint32_t QUIC_V2 = 0x6b3343cf;
-
 static const char* quic_version_str(uint32_t ver) {
     switch (ver) {
         case QUIC_V1: return "QUICv1";
         case QUIC_V2: return "QUICv2";
         default: return "unknown";
     }
-}
-
-static bool is_quic_version(uint32_t ver) {
-    return ver == QUIC_V1 || ver == QUIC_V2;
 }
 
 static const char* quic_long_packet_type_str(int type) {
@@ -2130,37 +2147,23 @@ ProtocolEngine::FastResult ProtocolEngine::fast_parse_quic(
                 offset += token_len;
             }
 
-            // Attempt Initial packet decryption to extract Client Hello
+            // Attempt Initial packet decryption to extract CRYPTO fragments
             auto decrypt_result = quic_crypto::decrypt_initial_packet(buf, len);
             if (decrypt_result.success && !decrypt_result.plaintext.empty()) {
-                // Extract CRYPTO frames (contain TLS ClientHello)
-                auto crypto_data = quic_crypto::extract_crypto_frames(
+                // Extract CRYPTO frame fragments (offset, data) pairs
+                auto frags = quic_crypto::extract_crypto_fragments(
                     decrypt_result.plaintext.data(), decrypt_result.plaintext.size());
-
-                if (!crypto_data.empty()) {
-                    // Parse the TLS handshake message via YAML engine
-                    // CRYPTO frame contains raw TLS handshake: type(1) + length(3) + body
-                    auto tls_pkt = parse_from_protocol_struct(
-                        crypto_data.data(), crypto_data.size(), "tls_handshake");
-
-                    // Copy extracted TLS fields into QUIC info
-                    if (tls_pkt.has_tls) {
-                        if (!tls_pkt.tls.sni.empty())
-                            q.sni = tls_pkt.tls.sni;
-                        if (!tls_pkt.tls.alpn.empty())
-                            q.alpn = tls_pkt.tls.alpn;
-                        if (!tls_pkt.tls.cipher_suites.empty())
-                            q.cipher_suites = tls_pkt.tls.cipher_suites;
-                    }
-                }
+                q.crypto_fragments = std::move(frags);
             }
         }
 
         return {len, ""};  // terminal protocol
     } else {
         // Short Header: first byte bit 7 = 0
-        // Cannot identify as QUIC without flow state — return empty to let caller handle
-        return {};
+        // Consume all bytes but don't set has_quic — Python-side flow state
+        // handler (_handle_quic_flow_state) will parse Short Headers using
+        // DCID length learned from prior Long Header packets.
+        return {len, ""};
     }
 }
 

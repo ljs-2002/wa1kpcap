@@ -747,23 +747,19 @@ QUICDecryptResult decrypt_initial_packet(const uint8_t* buf, size_t len) {
 // Extract CRYPTO frames from decrypted QUIC Initial payload
 // ============================================================================
 
-std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len) {
-    std::vector<uint8_t> result;
+std::vector<std::pair<uint64_t, std::string>> extract_crypto_fragments(const uint8_t* data, size_t len) {
+    std::vector<std::pair<uint64_t, std::string>> fragments;
     size_t pos = 0;
 
     while (pos < len) {
-        // Read frame type (varint)
         uint64_t frame_type = 0;
         if (!decode_varint(data, len, pos, frame_type)) break;
 
         if (frame_type == 0x00) {
-            // PADDING frame: single byte, no payload
             continue;
         } else if (frame_type == 0x01) {
-            // PING frame: no payload
             continue;
         } else if (frame_type == 0x02 || frame_type == 0x03) {
-            // ACK frame: skip it
             uint64_t largest_ack = 0, ack_delay = 0, ack_range_count = 0, first_range = 0;
             if (!decode_varint(data, len, pos, largest_ack)) break;
             if (!decode_varint(data, len, pos, ack_delay)) break;
@@ -771,11 +767,10 @@ std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len) {
             if (!decode_varint(data, len, pos, first_range)) break;
             for (uint64_t i = 0; i < ack_range_count; ++i) {
                 uint64_t gap = 0, range = 0;
-                if (!decode_varint(data, len, pos, gap)) return result;
-                if (!decode_varint(data, len, pos, range)) return result;
+                if (!decode_varint(data, len, pos, gap)) return fragments;
+                if (!decode_varint(data, len, pos, range)) return fragments;
             }
             if (frame_type == 0x03) {
-                // ACK_ECN: 3 additional varint fields
                 uint64_t ect0 = 0, ect1 = 0, ecn_ce = 0;
                 if (!decode_varint(data, len, pos, ect0)) break;
                 if (!decode_varint(data, len, pos, ect1)) break;
@@ -783,16 +778,16 @@ std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len) {
             }
             continue;
         } else if (frame_type == 0x06) {
-            // CRYPTO frame: offset (varint) + length (varint) + data
             uint64_t offset = 0, crypto_len = 0;
             if (!decode_varint(data, len, pos, offset)) break;
             if (!decode_varint(data, len, pos, crypto_len)) break;
             if (pos + crypto_len > len) break;
-            result.insert(result.end(), data + pos, data + pos + crypto_len);
+            fragments.emplace_back(offset,
+                std::string(reinterpret_cast<const char*>(data + pos),
+                            static_cast<size_t>(crypto_len)));
             pos += static_cast<size_t>(crypto_len);
             continue;
         } else if (frame_type == 0x1c || frame_type == 0x1d) {
-            // CONNECTION_CLOSE frame
             uint64_t error_code = 0, frame_type_cc = 0, reason_len = 0;
             if (!decode_varint(data, len, pos, error_code)) break;
             if (frame_type == 0x1c) {
@@ -803,8 +798,33 @@ std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len) {
             pos += static_cast<size_t>(reason_len);
             continue;
         } else {
-            // Unknown frame type — can't safely skip, stop parsing
             break;
+        }
+    }
+
+    return fragments;
+}
+
+std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len) {
+    auto fragments = extract_crypto_fragments(data, len);
+    if (fragments.empty()) return {};
+
+    // Sort by offset and reassemble into a contiguous buffer
+    std::sort(fragments.begin(), fragments.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    uint64_t max_end = 0;
+    for (const auto& f : fragments) {
+        uint64_t end = f.first + f.second.size();
+        if (end > max_end) max_end = end;
+    }
+    if (max_end > 65536) max_end = 65536;
+
+    std::vector<uint8_t> result(static_cast<size_t>(max_end), 0);
+    for (const auto& f : fragments) {
+        if (f.first < max_end) {
+            size_t copy_len = (std::min)(f.second.size(), static_cast<size_t>(max_end - f.first));
+            std::memcpy(result.data() + f.first, f.second.data(), copy_len);
         }
     }
 

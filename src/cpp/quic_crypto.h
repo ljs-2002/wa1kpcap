@@ -57,7 +57,10 @@ struct QUICDecryptResult {
 QUICDecryptResult decrypt_initial_packet(const uint8_t* buf, size_t len);
 
 // Extract CRYPTO frame payload from decrypted Initial packet frames.
-// Returns concatenated CRYPTO frame data (which contains the TLS ClientHello).
+// Returns reassembled CRYPTO frame data sorted by offset.
 std::vector<uint8_t> extract_crypto_frames(const uint8_t* data, size_t len);
+
+// Extract CRYPTO frame fragments as (offset, data) pairs.
+std::vector<std::pair<uint64_t, std::string>> extract_crypto_fragments(const uint8_t* data, size_t len);
 
 }  // namespace quic_crypto

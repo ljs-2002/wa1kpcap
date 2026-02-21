@@ -495,8 +495,71 @@ class Wa1kPcap:
             flow.tls.certificates = [bytes(c) for c in native_certs]
             flow.tls.certificate = flow.tls.certificates[0]
 
-        # 4. Build extended protocol stack
+        # 4. QUIC: cross-packet CRYPTO frame reassembly and TLS ClientHello parsing
+        if flow.quic and flow.quic.sni is None:
+            self._reassemble_quic_crypto(flow)
+
+        # 4b. QUIC: fill server SCID from first packet that has a non-empty scid
+        if flow.quic and not flow.quic.scid:
+            for pkt in flow.packets:
+                q = pkt.quic
+                if q and q.scid:
+                    flow.quic.scid = q.scid
+                    flow.quic.scid_len = q.scid_len
+                    break
+
+        # 5. Build extended protocol stack
         flow.build_ext_protocol()
+
+    def _reassemble_quic_crypto(self, flow: Flow) -> None:
+        """Reassemble CRYPTO fragments across packets and parse TLS ClientHello."""
+        import struct
+
+        # Collect all CRYPTO fragments from all packets in this flow
+        all_fragments = []
+        for pkt in flow.packets:
+            q = pkt.quic
+            if q is None:
+                continue
+            frags = getattr(q, 'crypto_fragments', None)
+            if frags:
+                all_fragments.extend(frags)
+
+        if not all_fragments:
+            return
+
+        # Sort by offset and reassemble
+        all_fragments.sort(key=lambda x: x[0])
+        max_end = max(off + len(data) for off, data in all_fragments)
+        if max_end > 65536:
+            max_end = 65536
+        reassembled = bytearray(max_end)
+        for off, data in all_fragments:
+            if off < max_end:
+                end = min(off + len(data), max_end)
+                reassembled[off:end] = data[:end - off]
+
+        # Need at least TLS handshake header (4 bytes)
+        if len(reassembled) < 4 or reassembled[0] != 1:
+            return  # Not a ClientHello
+
+        # Parse via native engine's TLS handshake parser
+        try:
+            from wa1kpcap.native import _wa1kpcap_native as _native
+            if _native is None:
+                return
+            parser = self._native_engine._parser
+            tls_pkt = parser.parse_from_protocol(bytes(reassembled), "tls_handshake")
+            if tls_pkt.tls is not None:
+                q = flow.quic
+                if tls_pkt.tls.sni:
+                    q.sni = tls_pkt.tls.sni
+                if tls_pkt.tls.alpn:
+                    q.alpn = tls_pkt.tls.alpn
+                if tls_pkt.tls.cipher_suites:
+                    q.cipher_suites = tls_pkt.tls.cipher_suites
+        except Exception:
+            pass
 
     def _merge_tls_state_to_flow(self, flow: Flow, tls_state) -> None:
         """Convert TLSFlowState (dpkt reassembly) into flow.tls via merge."""

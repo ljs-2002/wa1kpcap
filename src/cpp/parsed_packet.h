@@ -222,6 +222,9 @@ struct NativeQUICInfo {
 
     // Packet type string
     std::string packet_type_str;  // e.g. "Initial", "Handshake", "0-RTT", "Retry", "1-RTT"
+
+    // Raw CRYPTO frame fragments from Initial decryption: [(offset, data), ...]
+    std::vector<std::pair<uint64_t, std::string>> crypto_fragments;
 };
 
 struct NativeParsedPacket {
