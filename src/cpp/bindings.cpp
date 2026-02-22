@@ -1288,4 +1288,14 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def("flow_count", &NativeFlowManager::flow_count)
         .def("total_flow_count", &NativeFlowManager::total_flow_count)
         .def("clear", &NativeFlowManager::clear);
+
+    // ── convert_to_parsed_packet: NativeParsedPacket → Python ParsedPacket ──
+    m.def("convert_to_parsed_packet", [](const NativeParsedPacket& pkt) {
+        py::object raw_py = pkt.raw_data.empty()
+            ? py::bytes("") : py::bytes(pkt.raw_data);
+        return build_dataclass_from_struct(
+            pkt, raw_py, pkt.timestamp, pkt.link_layer_type,
+            pkt.caplen, pkt.wirelen);
+    }, py::arg("native_pkt"),
+       "Convert a NativeParsedPacket to a Python ParsedPacket.");
 }

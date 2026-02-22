@@ -265,6 +265,9 @@ class Flow:
     _is_quic: bool = False
     _quic_dcid_len: int = 0
 
+    # IP version hint (set by C++ pipeline when packets list is empty)
+    _ip_version: int = 0  # 4 or 6
+
     # Incremental feature accumulation (populated by add_packet)
     _seq_packet_lengths: list = field(default_factory=list)
     _seq_ip_lengths: list = field(default_factory=list)
@@ -982,6 +985,10 @@ class Flow:
                 protocol_stack.append("IPv4")
             elif self.packets[0].ip6:
                 protocol_stack.append("IPv6")
+        elif self._ip_version == 4:
+            protocol_stack.append("IPv4")
+        elif self._ip_version == 6:
+            protocol_stack.append("IPv6")
 
         # Transport layer
         protocol_num = self.key.protocol
