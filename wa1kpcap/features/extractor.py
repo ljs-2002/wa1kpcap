@@ -89,6 +89,9 @@ class FlowFeatures:
     # Statistical features (computed lazily)
     _statistics: dict[str, Any] = field(default_factory=dict)
 
+    # Pre-computed C++ features (set by from_native_features)
+    _native_features: Any = field(default=None, repr=False)
+
     # Protocol fields
     protocol_fields: dict[str, Any] = field(default_factory=dict)
 
@@ -104,6 +107,53 @@ class FlowFeatures:
             Includes 'packet_count', 'total_bytes', 'duration' at top level.
         """
         stats = {}
+
+        # C++ pre-computed path: use NativeFlowFeatures directly
+        nf = self._native_features
+        if nf is not None:
+            if nf.has_packet_lengths:
+                stats['packet_lengths'] = self._native_stats_to_dict(nf.packet_lengths)
+            if nf.has_ip_lengths:
+                stats['ip_lengths'] = self._native_stats_to_dict(nf.ip_lengths)
+            if nf.has_trans_lengths:
+                stats['trans_lengths'] = self._native_stats_to_dict(nf.trans_lengths)
+            if nf.has_app_lengths:
+                stats['app_lengths'] = self._native_stats_to_dict(nf.app_lengths)
+            if nf.has_iats:
+                stats['iats'] = self._native_stats_to_dict(nf.iats)
+            if nf.has_payload_bytes:
+                stats['payload_bytes'] = self._native_stats_to_dict(nf.payload_bytes)
+            if nf.has_tcp_flags:
+                stats['tcp_flags'] = self._native_stats_to_dict(nf.tcp_flags)
+            if nf.has_tcp_window:
+                stats['tcp_window'] = self._native_stats_to_dict(nf.tcp_window)
+
+            # Basic flow stats
+            pkt_stats = stats.get('packet_lengths')
+            if pkt_stats:
+                stats['packet_count'] = pkt_stats['count']
+                stats['total_bytes'] = int(pkt_stats['sum'])
+                up_count = pkt_stats['up_count']
+                down_count = pkt_stats['down_count']
+                up_bytes = int(pkt_stats['up_sum'])
+                down_bytes = int(pkt_stats['down_sum'])
+            else:
+                stats['packet_count'] = nf.packet_count
+                stats['total_bytes'] = nf.total_bytes
+                up_count = down_count = 0
+                up_bytes = down_bytes = 0
+
+            iat_stats = stats.get('iats')
+            if iat_stats:
+                stats['duration'] = iat_stats['sum']
+            else:
+                stats['duration'] = nf.duration
+
+            stats['up_down_pkt_ratio'] = float(up_count) / float(down_count) if down_count > 0 else 0.0
+            stats['up_down_byte_ratio'] = float(up_bytes) / float(down_bytes) if down_bytes > 0 else 0.0
+
+            self._statistics = stats
+            return stats
 
         # Batch path: compute all array stats in one C++ call (flat array return)
         if _native_batch_stats is not None:
@@ -384,6 +434,34 @@ class FlowFeatures:
             if len(features.timestamps) > 1:
                 features.iats = np.diff(features.timestamps)
             return features
+
+    @classmethod
+    def from_native_features(cls, nf_features) -> FlowFeatures:
+        """Build FlowFeatures from C++ NativeFlowFeatures with pre-computed stats.
+
+        Skips numpy array creation and stats computation entirely — reads
+        pre-computed statistics directly from C++.
+        """
+        features = cls()
+        features._native_features = nf_features
+        # Store minimal numpy arrays for sequence access (e.g., to_dict)
+        # but skip stats computation — it's already done in C++
+        return features
+
+    def _native_stats_to_dict(self, s) -> dict:
+        """Convert a NativeArrayStats to the same dict format as _compute_array_stats."""
+        return {
+            'mean': s.mean, 'std': s.std_val, 'var': s.var,
+            'min': s.lo, 'max': s.hi, 'range': s.hi - s.lo,
+            'median': s.median, 'sum': s.total,
+            'up_mean': s.up_mean, 'up_std': s.up_std,
+            'up_min': s.up_lo, 'up_max': s.up_hi,
+            'up_sum': s.up_total, 'up_count': int(s.n_up),
+            'down_mean': s.dn_mean, 'down_std': s.dn_std,
+            'down_min': s.dn_lo, 'down_max': s.dn_hi,
+            'down_sum': s.dn_total, 'down_count': int(s.n_dn),
+            'count': int(s.n),
+        }
 
         # Fallback: original traversal path (for manually constructed Flows)
         features = cls()

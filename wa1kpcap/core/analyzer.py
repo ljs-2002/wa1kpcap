@@ -483,12 +483,18 @@ class Wa1kPcap:
         if self._packet_filter and self._packet_filter.has_app_layer:
             flows = self._post_filter_flows(flows)
 
-        # Extract features (uses fast path: flow._seq_* already populated)
-        for flow in flows:
+        # Extract features using C++ pre-computed stats
+        from wa1kpcap.features.extractor import FlowFeatures
+        for py_flow, nf in zip(flows, native_flows):
             if self.verbose_mode:
-                flow._verbose = True
-                flow._save_raw = self.save_raw_bytes
-            flow.features = self._feature_extractor.extract(flow)
+                py_flow._verbose = True
+                py_flow._save_raw = self.save_raw_bytes
+            # Compute all stats in C++ (IATs, packet_lengths, etc.)
+            native_feat = nf.compute_features()
+            features = FlowFeatures.from_native_features(native_feat)
+            if self._feature_extractor.compute_statistics:
+                features.compute_statistics()
+            py_flow.features = features
 
         self._stats['flows_created'] += len(flows)
 

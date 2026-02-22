@@ -19,6 +19,7 @@
 #include "flow_buffer.h"
 #include "flow_manager.h"
 #include "quic_crypto.h"
+#include "stats_core.h"
 
 // Safety: undef any remaining macros that leaked through
 #ifdef max
@@ -33,9 +34,6 @@
 
 namespace py = pybind11;
 using namespace pybind11::literals;
-
-static inline double dabs(double x) { return x >= 0.0 ? x : -x; }
-static inline double dmax(double a, double b) { return a >= b ? a : b; }
 
 // ── ClassCache: cached Python class references for dataclass construction ──
 
@@ -449,89 +447,7 @@ static py::dict compute_array_stats_impl(py::array_t<double, py::array::c_style 
     );
 }
 
-// ── Core stats computation (reusable for single + batch) ──
-
-struct ArrayStats {
-    double mean, std_val, var, lo, hi, median, total;
-    double up_mean, up_std, up_lo, up_hi, up_total;
-    double dn_mean, dn_std, dn_lo, dn_hi, dn_total;
-    int64_t n, n_up, n_dn;
-};
-
-static ArrayStats compute_stats_core(const double* ptr, Py_ssize_t n) {
-    ArrayStats s{};
-    s.n = n;
-    if (n == 0) return s;
-
-    double total = 0.0, sq_total = 0.0;
-    double lo = dabs(ptr[0]), hi = lo;
-    double up_total = 0.0, up_sq = 0.0, up_lo = 0.0, up_hi = 0.0;
-    double dn_total = 0.0, dn_sq = 0.0, dn_lo = 0.0, dn_hi = 0.0;
-    Py_ssize_t n_up = 0, n_dn = 0;
-
-    std::vector<double> abs_vals(n);
-
-    for (Py_ssize_t i = 0; i < n; i++) {
-        double v = ptr[i];
-        double a = dabs(v);
-        abs_vals[i] = a;
-        total += a;
-        sq_total += a * a;
-        if (a < lo) lo = a;
-        if (a > hi) hi = a;
-
-        if (v > 0) {
-            if (n_up == 0) { up_lo = up_hi = a; }
-            else { if (a < up_lo) up_lo = a; if (a > up_hi) up_hi = a; }
-            up_total += a; up_sq += a * a; n_up++;
-        } else if (v < 0) {
-            if (n_dn == 0) { dn_lo = dn_hi = a; }
-            else { if (a < dn_lo) dn_lo = a; if (a > dn_hi) dn_hi = a; }
-            dn_total += a; dn_sq += a * a; n_dn++;
-        }
-    }
-
-    double mean = total / n;
-    double var = sq_total / n - mean * mean;
-    if (var < 0) var = 0.0;
-
-    double median;
-    if (n % 2 == 1) {
-        std::nth_element(abs_vals.begin(), abs_vals.begin() + n / 2, abs_vals.end());
-        median = abs_vals[n / 2];
-    } else {
-        std::nth_element(abs_vals.begin(), abs_vals.begin() + n / 2, abs_vals.end());
-        double right = abs_vals[n / 2];
-        double left = abs_vals[0];
-        for (Py_ssize_t i = 1; i < n / 2; i++) {
-            if (abs_vals[i] > left) left = abs_vals[i];
-        }
-        median = (left + right) * 0.5;
-    }
-
-    double up_mean = 0.0, up_std = 0.0;
-    if (n_up > 1) {
-        up_mean = up_total / n_up;
-        double up_var = up_sq / n_up - up_mean * up_mean;
-        up_std = sqrt(dmax(0.0, up_var));
-    } else if (n_up == 1) { up_mean = up_total; }
-
-    double dn_mean = 0.0, dn_std = 0.0;
-    if (n_dn > 1) {
-        dn_mean = dn_total / n_dn;
-        double dn_var = dn_sq / n_dn - dn_mean * dn_mean;
-        dn_std = sqrt(dmax(0.0, dn_var));
-    } else if (n_dn == 1) { dn_mean = dn_total; }
-
-    s.mean = mean; s.std_val = sqrt(var); s.var = var;
-    s.lo = lo; s.hi = hi; s.median = median; s.total = total;
-    s.up_mean = up_mean; s.up_std = up_std; s.up_lo = up_lo;
-    s.up_hi = up_hi; s.up_total = up_total;
-    s.dn_mean = dn_mean; s.dn_std = dn_std; s.dn_lo = dn_lo;
-    s.dn_hi = dn_hi; s.dn_total = dn_total;
-    s.n_up = n_up; s.n_dn = n_dn;
-    return s;
-}
+// ── Core stats: now in stats_core.h ──
 
 static py::dict stats_to_pydict(const ArrayStats& s) {
     return py::dict(
@@ -550,7 +466,6 @@ static py::dict stats_to_pydict(const ArrayStats& s) {
 
 // Batch: compute stats for multiple named arrays in one C++ call
 // Returns (names_list, flat_array) where flat_array has 21 doubles per array
-static constexpr int STATS_PER_ARRAY = 21;
 
 static py::tuple compute_batch_stats_flat_impl(py::dict named_arrays) {
     // Collect names and arrays
@@ -1241,6 +1156,54 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def_readwrite("max_window", &NativeFlowMetrics::max_window)
         .def_readwrite("sum_window", &NativeFlowMetrics::sum_window);
 
+    // ── NativeArrayStats (alias for ArrayStats from stats_core.h) ──
+    py::class_<NativeArrayStats>(m, "NativeArrayStats")
+        .def(py::init<>())
+        .def_readonly("mean", &NativeArrayStats::mean)
+        .def_readonly("std_val", &NativeArrayStats::std_val)
+        .def_readonly("var", &NativeArrayStats::var)
+        .def_readonly("lo", &NativeArrayStats::lo)
+        .def_readonly("hi", &NativeArrayStats::hi)
+        .def_readonly("median", &NativeArrayStats::median)
+        .def_readonly("total", &NativeArrayStats::total)
+        .def_readonly("up_mean", &NativeArrayStats::up_mean)
+        .def_readonly("up_std", &NativeArrayStats::up_std)
+        .def_readonly("up_lo", &NativeArrayStats::up_lo)
+        .def_readonly("up_hi", &NativeArrayStats::up_hi)
+        .def_readonly("up_total", &NativeArrayStats::up_total)
+        .def_readonly("dn_mean", &NativeArrayStats::dn_mean)
+        .def_readonly("dn_std", &NativeArrayStats::dn_std)
+        .def_readonly("dn_lo", &NativeArrayStats::dn_lo)
+        .def_readonly("dn_hi", &NativeArrayStats::dn_hi)
+        .def_readonly("dn_total", &NativeArrayStats::dn_total)
+        .def_readonly("n", &NativeArrayStats::n)
+        .def_readonly("n_up", &NativeArrayStats::n_up)
+        .def_readonly("n_dn", &NativeArrayStats::n_dn);
+
+    // ── NativeFlowFeatures ──
+    py::class_<NativeFlowFeatures>(m, "NativeFlowFeatures")
+        .def(py::init<>())
+        .def_readonly("packet_lengths", &NativeFlowFeatures::packet_lengths)
+        .def_readonly("ip_lengths", &NativeFlowFeatures::ip_lengths)
+        .def_readonly("trans_lengths", &NativeFlowFeatures::trans_lengths)
+        .def_readonly("app_lengths", &NativeFlowFeatures::app_lengths)
+        .def_readonly("iats", &NativeFlowFeatures::iats)
+        .def_readonly("payload_bytes", &NativeFlowFeatures::payload_bytes)
+        .def_readonly("tcp_flags", &NativeFlowFeatures::tcp_flags)
+        .def_readonly("tcp_window", &NativeFlowFeatures::tcp_window)
+        .def_readonly("has_packet_lengths", &NativeFlowFeatures::has_packet_lengths)
+        .def_readonly("has_ip_lengths", &NativeFlowFeatures::has_ip_lengths)
+        .def_readonly("has_trans_lengths", &NativeFlowFeatures::has_trans_lengths)
+        .def_readonly("has_app_lengths", &NativeFlowFeatures::has_app_lengths)
+        .def_readonly("has_iats", &NativeFlowFeatures::has_iats)
+        .def_readonly("has_payload_bytes", &NativeFlowFeatures::has_payload_bytes)
+        .def_readonly("has_tcp_flags", &NativeFlowFeatures::has_tcp_flags)
+        .def_readonly("has_tcp_window", &NativeFlowFeatures::has_tcp_window)
+        .def_readonly("iat_values", &NativeFlowFeatures::iat_values)
+        .def_readonly("duration", &NativeFlowFeatures::duration)
+        .def_readonly("packet_count", &NativeFlowFeatures::packet_count)
+        .def_readonly("total_bytes", &NativeFlowFeatures::total_bytes);
+
     // ── NativeFlow ──
     py::class_<NativeFlow>(m, "NativeFlow")
         .def(py::init<>())
@@ -1270,7 +1233,8 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         }, py::arg("pkt"))
         .def("update_tcp_state", &NativeFlow::update_tcp_state,
              py::arg("pkt"), py::arg("direction"))
-        .def("is_tcp_closed", &NativeFlow::is_tcp_closed);
+        .def("is_tcp_closed", &NativeFlow::is_tcp_closed)
+        .def("compute_features", &NativeFlow::compute_features);
 
     // ── NativeFlowManager ──
     py::class_<NativeFlowManager>(m, "NativeFlowManager")

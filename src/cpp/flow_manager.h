@@ -1,6 +1,7 @@
 #pragma once
 
 #include "parsed_packet.h"
+#include "stats_core.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -137,6 +138,39 @@ enum class NativeTCPState : uint8_t {
     CLOSE_WAIT = 8,
     LAST_ACK = 9,
     RESET = 10
+};
+
+// ── Flow features (pre-computed statistics) ──
+// Uses ArrayStats from stats_core.h
+
+// Alias for clarity in Python bindings
+using NativeArrayStats = ArrayStats;
+
+struct NativeFlowFeatures {
+    ArrayStats packet_lengths;
+    ArrayStats ip_lengths;
+    ArrayStats trans_lengths;
+    ArrayStats app_lengths;
+    ArrayStats iats;
+    ArrayStats payload_bytes;
+    ArrayStats tcp_flags;
+    ArrayStats tcp_window;
+
+    bool has_packet_lengths = false;
+    bool has_ip_lengths = false;
+    bool has_trans_lengths = false;
+    bool has_app_lengths = false;
+    bool has_iats = false;
+    bool has_payload_bytes = false;
+    bool has_tcp_flags = false;
+    bool has_tcp_window = false;
+
+    // Raw sequences for FlowFeatures dataclass fields
+    std::vector<double> iat_values;  // computed from seq_timestamps diff
+
+    double duration = 0.0;
+    int64_t packet_count = 0;
+    int64_t total_bytes = 0;
 };
 
 // ── Native Flow ──
@@ -276,6 +310,58 @@ struct NativeFlow {
                    s == NativeTCPState::TIME_WAIT;
         };
         return is_done(tcp_state_fwd) && is_done(tcp_state_rev);
+    }
+
+    // Compute all flow features (stats + IATs) in C++
+    NativeFlowFeatures compute_features() const {
+        NativeFlowFeatures f;
+        f.packet_count = metrics.packet_count;
+        f.total_bytes = metrics.byte_count;
+        f.duration = (end_time > start_time) ? (end_time - start_time) : 0.0;
+
+        if (!seq_packet_lengths.empty()) {
+            f.packet_lengths = compute_stats_from_ints(seq_packet_lengths);
+            f.has_packet_lengths = true;
+        }
+        if (!seq_ip_lengths.empty()) {
+            f.ip_lengths = compute_stats_from_ints(seq_ip_lengths);
+            f.has_ip_lengths = true;
+        }
+        if (!seq_trans_lengths.empty()) {
+            f.trans_lengths = compute_stats_from_ints(seq_trans_lengths);
+            f.has_trans_lengths = true;
+        }
+        if (!seq_app_lengths.empty()) {
+            f.app_lengths = compute_stats_from_ints(seq_app_lengths);
+            f.has_app_lengths = true;
+        }
+        if (!seq_payload_bytes.empty()) {
+            f.payload_bytes = compute_stats_from_ints(seq_payload_bytes);
+            f.has_payload_bytes = true;
+        }
+        if (!seq_tcp_flags.empty()) {
+            // TCP flags are unsigned but stored as int64_t; convert to double
+            std::vector<double> dv(seq_tcp_flags.begin(), seq_tcp_flags.end());
+            f.tcp_flags = compute_stats_core(dv.data(), static_cast<int64_t>(dv.size()));
+            f.has_tcp_flags = true;
+        }
+        if (!seq_tcp_windows.empty()) {
+            std::vector<double> dv(seq_tcp_windows.begin(), seq_tcp_windows.end());
+            f.tcp_window = compute_stats_core(dv.data(), static_cast<int64_t>(dv.size()));
+            f.has_tcp_window = true;
+        }
+
+        // Compute IATs from timestamps
+        if (seq_timestamps.size() > 1) {
+            f.iat_values.resize(seq_timestamps.size() - 1);
+            for (size_t i = 1; i < seq_timestamps.size(); i++) {
+                f.iat_values[i - 1] = seq_timestamps[i] - seq_timestamps[i - 1];
+            }
+            f.iats = compute_stats_from_doubles(f.iat_values);
+            f.has_iats = true;
+        }
+
+        return f;
     }
 };
 
