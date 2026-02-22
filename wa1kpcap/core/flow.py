@@ -405,7 +405,7 @@ class Flow:
         obj._seq_payload_bytes = None
         obj._seq_tcp_flags = None
         obj._seq_tcp_windows = None
-        obj._custom_features = None
+        obj._custom_features = {}
         obj._feature_initialized = False
         obj._tls_incomplete_data = None
         obj._tls_state = None

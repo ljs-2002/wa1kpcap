@@ -206,6 +206,12 @@ class Wa1kPcap:
     ):
         # dpkt fallback: if user requests dpkt but it's not installed, warn and use native
         if engine == "dpkt":
+            warnings.warn(
+                "The dpkt engine is deprecated and will be removed in a future version. "
+                "Use engine='native' (default) for better performance.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             try:
                 import dpkt  # noqa: F401
             except ImportError:
@@ -534,6 +540,49 @@ class Wa1kPcap:
             features = FlowFeatures()
             features._statistics = stats_dict
             py_flow.features = features
+
+        # Custom feature post-processing: materialize packets and run update() per packet
+        if self._custom_features:
+            for py_flow in flows:
+                py_flow._custom_features = dict(self._custom_features)
+                py_flow._feature_initialized = False
+                py_flow._initialize_features()
+                for pkt in py_flow.packets:  # triggers lazy materialization
+                    for name, processor in py_flow._custom_features.items():
+                        try:
+                            processor.update(py_flow, pkt)
+                        except Exception:
+                            pass
+
+        # Custom protocol aggregation: if user registered non-builtin protocols
+        # in ProtocolRegistry, aggregate extra_layers from packets into flow.layers.
+        # Only materializes packets for flows that need it.
+        from wa1kpcap.core.packet import ProtocolRegistry as _PR, _ProtocolInfoBase
+        proto_registry = _PR.get_instance()
+        # Snapshot default protocol keys on first call
+        if not hasattr(proto_registry, '_default_keys'):
+            proto_registry._default_keys = frozenset(proto_registry._registry.keys())
+        user_protos = set(proto_registry._registry.keys()) - proto_registry._default_keys
+        has_custom_protos = bool(user_protos)
+        if has_custom_protos:
+            _default_keys = proto_registry._default_keys
+            for py_flow in flows:
+                for pkt in py_flow.packets:  # triggers lazy materialization
+                    if not hasattr(pkt, 'layers') or not pkt.layers:
+                        continue
+                    for name, info in pkt.layers.items():
+                        if name in _default_keys:
+                            continue
+                        existing = py_flow.layers.get(name)
+                        if existing is None:
+                            if isinstance(info, _ProtocolInfoBase):
+                                py_flow.layers[name] = info.copy()
+                            else:
+                                py_flow.layers[name] = info
+                        elif isinstance(existing, _ProtocolInfoBase) and isinstance(info, _ProtocolInfoBase):
+                            existing.merge(info)
+                # Rebuild ext_protocol to include custom protocols
+                py_flow.build_ext_protocol()
 
         # Post-parse app-layer filtering (e.g., bpf_filter="tls")
         if self._packet_filter and self._packet_filter.has_app_layer:
