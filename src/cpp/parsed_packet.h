@@ -255,6 +255,9 @@ struct NativeParsedPacket {
     // Raw TCP payload for reassembly
     std::string _raw_tcp_payload;  // stored as py::bytes
 
+    // Full raw packet bytes (for QUIC Short Header parsing in C++ pipeline)
+    std::vector<uint8_t> _raw_bytes;
+
     // TLS bytes consumed by parse_tls_stream (for Python buffer management)
     int64_t tls_bytes_consumed = 0;
 

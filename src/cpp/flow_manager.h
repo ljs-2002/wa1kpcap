@@ -9,6 +9,11 @@
 #include <functional>
 #include <limits>
 
+// Forward declarations
+class ProtocolEngine;
+class NativeFilter;
+class NativePcapReader;
+
 // ── Flow key: 5-tuple + VLAN for bidirectional flow identification ──
 
 struct NativeFlowKey {
@@ -390,3 +395,154 @@ private:
     std::unordered_map<CanonicalFlowKey, std::unique_ptr<NativeFlow>, CanonicalFlowKeyHash> flows_;
     std::vector<std::unique_ptr<NativeFlow>> completed_flows_;
 };
+
+// ── Process pipeline configuration ──
+
+struct ProcessConfig {
+    // Filtering
+    bool filter_ack = false;
+    bool filter_rst = false;
+    bool filter_retrans = true;
+
+    // Flow management
+    NativeFlowManagerConfig flow_config;
+
+    // Parsing
+    int app_layer_mode = 0;  // 0=full, 1=port_only, 2=none
+    bool save_raw_bytes = false;
+};
+
+// ── Process pipeline statistics ──
+
+struct ProcessStats {
+    int64_t packets_processed = 0;
+    int64_t packets_filtered = 0;
+    int64_t flows_created = 0;
+    int64_t errors = 0;
+};
+
+// ── Per-packet helpers (used by process_file) ──
+
+// Check if packet should be filtered (ACK-only / RST)
+inline bool should_filter_packet(const NativeParsedPacket& pkt,
+                                  bool filter_ack, bool filter_rst) {
+    if (!pkt.has_tcp) return false;
+
+    // Filter RST
+    if (filter_rst && (pkt.tcp.flags & 0x04))
+        return true;
+
+    // Filter pure ACK (only ACK flag, no payload, no options)
+    if (filter_ack) {
+        bool is_pure_ack = (pkt.tcp.flags == 0x10) &&
+                           pkt.tcp.options.empty() &&
+                           (pkt.app_len == 0);
+        if (is_pure_ack) return true;
+    }
+
+    return false;
+}
+
+// Check TCP retransmission. Returns true if retransmitted.
+inline bool check_retransmission(const NativeParsedPacket& pkt,
+                                  NativeFlow& flow, int dir) {
+    if (!pkt.has_tcp) return false;
+
+    int64_t flags = pkt.tcp.flags;
+    int64_t seq_len = pkt.app_len;
+    if (flags & 0x02) seq_len++;  // SYN
+    if (flags & 0x01) seq_len++;  // FIN
+    if (seq_len == 0) return false;
+
+    uint32_t seq = static_cast<uint32_t>(pkt.tcp.seq);
+    uint32_t seq_end = (seq + static_cast<uint32_t>(seq_len)) & 0xFFFFFFFF;
+
+    auto it = flow.next_seq.find(dir);
+    if (it == flow.next_seq.end()) {
+        // First data packet in this direction
+        flow.next_seq[dir] = seq_end;
+        return false;
+    }
+
+    uint32_t next = it->second;
+
+    // TCP Keep-Alive: seq == next_seq - 1, payload <= 1, no SYN/FIN
+    if (pkt.app_len <= 1 && !(flags & 0x03)) {
+        if (((seq - (next - 1)) & 0xFFFFFFFF) == 0)
+            return false;
+    }
+
+    uint32_t diff = (seq_end - next) & 0xFFFFFFFF;
+    if (diff == 0) {
+        return true;  // Exact duplicate
+    }
+    if (diff < 0x80000000U) {
+        // New data — advance tracker
+        flow.next_seq[dir] = seq_end;
+        return false;
+    }
+    // Already seen
+    return true;
+}
+
+// Handle QUIC flow state: mark flow on Long Header, parse Short Header
+inline void handle_quic_flow_state(NativeParsedPacket& pkt, NativeFlow& flow) {
+    if (pkt.has_quic && pkt.quic.is_long_header) {
+        flow.is_quic = true;
+        if (pkt.quic.dcid_len > 0)
+            flow.quic_dcid_len = pkt.quic.dcid_len;
+        return;
+    }
+
+    if (pkt.has_quic) return;  // Already parsed
+
+    // Not identified as QUIC — check if UDP on a QUIC flow
+    if (!flow.is_quic || !pkt.has_udp) return;
+
+    // Try Short Header parse from raw payload
+    // Short Header: bit 7 = 0, Fixed Bit (bit 6) = 1
+    // We need the UDP payload. Compute offset: caplen - app_len
+    if (pkt.app_len < 2) return;
+
+    // Access raw bytes stored in the packet
+    const std::vector<uint8_t>& raw = pkt._raw_bytes;
+    if (raw.empty()) return;
+
+    size_t udp_payload_offset = pkt.caplen - pkt.app_len;
+    if (udp_payload_offset >= raw.size()) return;
+
+    const uint8_t* buf = raw.data() + udp_payload_offset;
+    size_t buf_len = raw.size() - udp_payload_offset;
+    if (buf_len < 2) return;
+
+    uint8_t first = buf[0];
+    if ((first & 0x80) != 0 || (first & 0x40) == 0) return;
+
+    // Parse spin bit
+    bool spin_bit = (first & 0x20) != 0;
+
+    // Extract DCID
+    int dcid_len = flow.quic_dcid_len;
+    if (static_cast<int>(buf_len) < 1 + dcid_len) return;
+
+    pkt.has_quic = true;
+    pkt.quic.is_long_header = false;
+    pkt.quic.spin_bit = spin_bit;
+    pkt.quic.dcid_len = dcid_len;
+    if (dcid_len > 0) {
+        pkt.quic.dcid.assign(buf + 1, buf + 1 + dcid_len);
+    }
+    pkt.quic.packet_type_str = "1-RTT";
+}
+
+// ── process_file: fused read → parse → filter → flow management pipeline ──
+// Returns the flow manager with all flows populated.
+// The caller owns the returned FlowManager.
+
+ProcessStats process_file(
+    const std::string& pcap_path,
+    const ProtocolEngine& engine,
+    const NativeFilter* filter,       // may be nullptr
+    const ProcessConfig& config,
+    NativeFlowManager& flow_manager   // output: populated with flows
+);

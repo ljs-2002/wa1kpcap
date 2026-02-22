@@ -1168,6 +1168,39 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         return d;
     }, "Decrypt QUIC Initial packet");
 
+    // ── ProcessConfig ──
+    py::class_<ProcessConfig>(m, "ProcessConfig")
+        .def(py::init<>())
+        .def_readwrite("filter_ack", &ProcessConfig::filter_ack)
+        .def_readwrite("filter_rst", &ProcessConfig::filter_rst)
+        .def_readwrite("filter_retrans", &ProcessConfig::filter_retrans)
+        .def_readwrite("flow_config", &ProcessConfig::flow_config)
+        .def_readwrite("app_layer_mode", &ProcessConfig::app_layer_mode)
+        .def_readwrite("save_raw_bytes", &ProcessConfig::save_raw_bytes);
+
+    // ── ProcessStats ──
+    py::class_<ProcessStats>(m, "ProcessStats")
+        .def(py::init<>())
+        .def_readonly("packets_processed", &ProcessStats::packets_processed)
+        .def_readonly("packets_filtered", &ProcessStats::packets_filtered)
+        .def_readonly("flows_created", &ProcessStats::flows_created)
+        .def_readonly("errors", &ProcessStats::errors);
+
+    // ── process_file: fused C++ pipeline ──
+    m.def("process_file", [](const std::string& pcap_path,
+                              NativeParser& parser,
+                              py::object filter_obj,
+                              const ProcessConfig& config,
+                              NativeFlowManager& flow_manager) {
+        const NativeFilter* filt = nullptr;
+        if (!filter_obj.is_none()) {
+            filt = filter_obj.cast<NativeFilter*>();
+        }
+        return process_file(pcap_path, parser.engine(), filt, config, flow_manager);
+    }, py::arg("pcap_path"), py::arg("parser"), py::arg("filter") = py::none(),
+       py::arg("config") = ProcessConfig{}, py::arg("flow_manager"),
+       py::keep_alive<0, 2>(), py::keep_alive<0, 3>());
+
     // ── NativeFlowManagerConfig ──
     py::class_<NativeFlowManagerConfig>(m, "NativeFlowManagerConfig")
         .def(py::init<>())
