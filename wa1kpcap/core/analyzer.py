@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 import time
 import warnings
 
+import numpy as np
+
 if TYPE_CHECKING:
     from wa1kpcap.core.reader import PcapReader
     from wa1kpcap.core.flow import FlowManager, Flow
@@ -539,6 +541,25 @@ class Wa1kPcap:
                 py_flow._save_raw = save_raw
             features = FlowFeatures()
             features._statistics = stats_dict
+            # Populate sequence arrays from C++ NativeFlow
+            if nf.seq_timestamps:
+                features.timestamps = np.array(nf.seq_timestamps)
+            if nf.seq_packet_lengths:
+                features.packet_lengths = np.array(nf.seq_packet_lengths)
+            if nf.seq_ip_lengths:
+                features.ip_lengths = np.array(nf.seq_ip_lengths)
+            if nf.seq_trans_lengths:
+                features.trans_lengths = np.array(nf.seq_trans_lengths)
+            if nf.seq_app_lengths:
+                features.app_lengths = np.array(nf.seq_app_lengths)
+            if nf.seq_payload_bytes:
+                features.payload_bytes = np.array(nf.seq_payload_bytes)
+            if nf.seq_tcp_flags:
+                features.tcp_flags = np.array(nf.seq_tcp_flags)
+            if nf.seq_tcp_windows:
+                features.tcp_window_sizes = np.array(nf.seq_tcp_windows)
+            if len(features.timestamps) > 1:
+                features.iats = np.diff(features.timestamps)
             py_flow.features = features
 
         # Custom feature post-processing: materialize packets and run update() per packet
