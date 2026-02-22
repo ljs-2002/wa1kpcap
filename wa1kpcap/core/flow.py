@@ -12,6 +12,87 @@ import time
 from typing import TYPE_CHECKING
 
 
+class LazyPacketList:
+    """A list-like container that defers NativeParsedPacket → ParsedPacket conversion.
+
+    Holds a reference to C++ NativeFlow's packet list and only converts to
+    Python ParsedPacket objects on first access (iteration, indexing, len, bool).
+    After materialization, behaves as a plain list.
+    """
+    __slots__ = ('_native_packets', '_materialized', '_mgr_ref', '_post_hooks')
+
+    def __init__(self, native_packets=None, mgr_ref=None):
+        self._native_packets = native_packets  # C++ NativeFlow.packets
+        self._materialized: list | None = None
+        self._mgr_ref = mgr_ref  # prevent GC of NativeFlowManager
+        self._post_hooks: list | None = None  # (callback, args) run after materialization
+
+    def add_post_hook(self, callback, *args):
+        """Register a callback to run after materialization.
+
+        callback(materialized_list, *args) is called once after conversion.
+        """
+        if self._post_hooks is None:
+            self._post_hooks = []
+        self._post_hooks.append((callback, args))
+
+    def _materialize(self):
+        if self._materialized is not None:
+            return
+        if self._native_packets is None:
+            self._materialized = []
+            return
+        from wa1kpcap.native import _wa1kpcap_native as _native
+        self._materialized = [
+            _native.convert_to_parsed_packet(cpkt)
+            for cpkt in self._native_packets
+        ]
+        # Release C++ references
+        self._native_packets = None
+        self._mgr_ref = None
+        # Run post-materialization hooks
+        if self._post_hooks:
+            for callback, args in self._post_hooks:
+                callback(self._materialized, *args)
+            self._post_hooks = None
+
+    def __len__(self):
+        if self._materialized is not None:
+            return len(self._materialized)
+        if self._native_packets is not None:
+            return len(self._native_packets)
+        return 0
+
+    def __bool__(self):
+        return len(self) > 0
+
+    def __iter__(self):
+        self._materialize()
+        return iter(self._materialized)
+
+    def __getitem__(self, index):
+        self._materialize()
+        return self._materialized[index]
+
+    def __setitem__(self, index, value):
+        self._materialize()
+        self._materialized[index] = value
+
+    def append(self, item):
+        self._materialize()
+        self._materialized.append(item)
+
+    def extend(self, items):
+        self._materialize()
+        self._materialized.extend(items)
+
+    def __repr__(self):
+        if self._materialized is not None:
+            return repr(self._materialized)
+        n = len(self._native_packets) if self._native_packets else 0
+        return f'<LazyPacketList: {n} packets, not materialized>'
+
+
 class Protocol(IntFlag):
     """IP protocol numbers."""
     ICMP = 1

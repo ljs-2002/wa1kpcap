@@ -18,6 +18,18 @@ if TYPE_CHECKING:
 
 from wa1kpcap.core.flow import FlowManager, FlowManagerConfig
 from wa1kpcap.core.reader import PcapReader
+
+
+def _inject_tls_into_packets(packets: list, tls_info) -> None:
+    """Post-materialization hook: inject reassembled TLS info into the first
+    TCP data packet that doesn't already have TLS."""
+    for pkt in packets:
+        if pkt.tls is not None:
+            return  # Already has TLS, no injection needed
+    for pkt in packets:
+        if pkt.tcp and getattr(pkt, '_raw_tcp_payload', b''):
+            pkt.tls = tls_info
+            return
 from wa1kpcap.core.packet import ParsedPacket
 from wa1kpcap.core.filter import PacketFilter
 from wa1kpcap.features.extractor import FeatureExtractor
@@ -451,16 +463,21 @@ class Wa1kPcap:
         for py_flow, nf in zip(flows, native_flows):
             self._aggregate_native_flow_info(py_flow, nf)
 
-        # Materialize Python ParsedPacket objects from C++ stored packets.
-        # This is a batch conversion after the fused C++ pipeline completes —
-        # the speedup comes from eliminating per-packet Python↔C++ boundary
-        # crossing during parsing, not from skipping this post-processing step.
-        self._materialize_flow_packets(flows, native_flows)
-
-        # TLS reassembly post-processing
+        # TLS reassembly post-processing (works on C++ packets directly)
         if self._app_layer_mode == 0:
             for py_flow, nf in zip(flows, native_flows):
                 self._native_tls_reassembly_pass(py_flow, nf)
+
+        # Assign lazy packet lists — defers NativeParsedPacket → ParsedPacket
+        # conversion until flow.packets is actually accessed.
+        from wa1kpcap.core.flow import LazyPacketList
+        for py_flow, nf in zip(flows, native_flows):
+            lazy = LazyPacketList(nf.packets, mgr)
+            # If TLS reassembly produced results, inject into packets on materialization
+            reassembled_tls = getattr(py_flow, '_reassembled_tls', None)
+            if reassembled_tls is not None:
+                lazy.add_post_hook(_inject_tls_into_packets, reassembled_tls)
+            py_flow.packets = lazy
 
         # Post-parse app-layer filtering (e.g., bpf_filter="tls")
         if self._packet_filter and self._packet_filter.has_app_layer:
@@ -648,28 +665,6 @@ class Wa1kPcap:
         # Build extended protocol stack
         flow.build_ext_protocol()
 
-    def _materialize_flow_packets(self, flows, native_flows) -> None:
-        """Convert C++ NativeParsedPackets to Python ParsedPacket objects.
-
-        Populates flow.packets for verbose_mode or when reassembly needs
-        per-packet access.
-        """
-        from wa1kpcap.native import _wa1kpcap_native as _native
-
-        for py_flow, nf in zip(flows, native_flows):
-            py_pkts = []
-            for i, cpkt in enumerate(nf.packets):
-                pkt = _native.convert_to_parsed_packet(cpkt)
-                pkt.is_client_to_server = cpkt.is_client_to_server
-                pkt.packet_index = cpkt.packet_index
-                pkt.flow_index = cpkt.flow_index
-                # Carry over raw TCP payload for TLS reassembly
-                raw_tcp = cpkt._raw_tcp_payload
-                if raw_tcp:
-                    pkt._raw_tcp_payload = raw_tcp
-                py_pkts.append(pkt)
-            py_flow.packets = py_pkts
-
     def _native_tls_reassembly_pass(self, flow, nf) -> None:
         """Run TLS stream reassembly over C++ stored packets.
 
@@ -728,18 +723,9 @@ class Wa1kPcap:
         if shim.tls is not None and flow.tls is None:
             flow.layers['tls_record'] = shim.tls
 
-        # Also update materialized packets if they exist
-        if flow.packets:
-            for pkt in flow.packets:
-                if pkt.tls is not None:
-                    break
-            else:
-                # No packet has TLS yet — find the one that should
-                if shim.tls is not None:
-                    for pkt in flow.packets:
-                        if pkt.tcp and getattr(pkt, '_raw_tcp_payload', b''):
-                            pkt.tls = shim.tls
-                            break
+        # Store reassembled TLS for lazy packet injection
+        if shim.tls is not None:
+            flow._reassembled_tls = shim.tls
 
         # Rebuild ext_protocol since TLS info may have changed
         flow.build_ext_protocol()
