@@ -17,6 +17,7 @@
 #include "yaml_loader.h"
 #include "bpf_filter.h"
 #include "flow_buffer.h"
+#include "flow_manager.h"
 #include "quic_crypto.h"
 
 // Safety: undef any remaining macros that leaked through
@@ -1166,4 +1167,92 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
             result.plaintext.size());
         return d;
     }, "Decrypt QUIC Initial packet");
+
+    // ── NativeFlowManagerConfig ──
+    py::class_<NativeFlowManagerConfig>(m, "NativeFlowManagerConfig")
+        .def(py::init<>())
+        .def_readwrite("udp_timeout", &NativeFlowManagerConfig::udp_timeout)
+        .def_readwrite("tcp_cleanup_timeout", &NativeFlowManagerConfig::tcp_cleanup_timeout)
+        .def_readwrite("max_flows", &NativeFlowManagerConfig::max_flows);
+
+    // ── NativeFlowKey ──
+    py::class_<NativeFlowKey>(m, "NativeFlowKey")
+        .def(py::init<>())
+        .def_readwrite("src_ip", &NativeFlowKey::src_ip)
+        .def_readwrite("dst_ip", &NativeFlowKey::dst_ip)
+        .def_readwrite("src_port", &NativeFlowKey::src_port)
+        .def_readwrite("dst_port", &NativeFlowKey::dst_port)
+        .def_readwrite("protocol", &NativeFlowKey::protocol)
+        .def_readwrite("vlan_id", &NativeFlowKey::vlan_id)
+        .def("direction", &NativeFlowKey::direction,
+             py::arg("pkt_src_ip"), py::arg("pkt_src_port"));
+
+    // ── NativeFlowMetrics ──
+    py::class_<NativeFlowMetrics>(m, "NativeFlowMetrics")
+        .def(py::init<>())
+        .def_readwrite("packet_count", &NativeFlowMetrics::packet_count)
+        .def_readwrite("byte_count", &NativeFlowMetrics::byte_count)
+        .def_readwrite("up_packet_count", &NativeFlowMetrics::up_packet_count)
+        .def_readwrite("up_byte_count", &NativeFlowMetrics::up_byte_count)
+        .def_readwrite("down_packet_count", &NativeFlowMetrics::down_packet_count)
+        .def_readwrite("down_byte_count", &NativeFlowMetrics::down_byte_count)
+        .def_readwrite("syn_count", &NativeFlowMetrics::syn_count)
+        .def_readwrite("fin_count", &NativeFlowMetrics::fin_count)
+        .def_readwrite("rst_count", &NativeFlowMetrics::rst_count)
+        .def_readwrite("ack_count", &NativeFlowMetrics::ack_count)
+        .def_readwrite("psh_count", &NativeFlowMetrics::psh_count)
+        .def_readwrite("urg_count", &NativeFlowMetrics::urg_count)
+        .def_readwrite("retrans_count", &NativeFlowMetrics::retrans_count)
+        .def_readwrite("out_of_order_count", &NativeFlowMetrics::out_of_order_count)
+        .def_readwrite("min_window", &NativeFlowMetrics::min_window)
+        .def_readwrite("max_window", &NativeFlowMetrics::max_window)
+        .def_readwrite("sum_window", &NativeFlowMetrics::sum_window);
+
+    // ── NativeFlow ──
+    py::class_<NativeFlow>(m, "NativeFlow")
+        .def(py::init<>())
+        .def_readwrite("key", &NativeFlow::key)
+        .def_readwrite("metrics", &NativeFlow::metrics)
+        .def_readwrite("start_time", &NativeFlow::start_time)
+        .def_readwrite("end_time", &NativeFlow::end_time)
+        .def_readonly("seq_packet_lengths", &NativeFlow::seq_packet_lengths)
+        .def_readonly("seq_ip_lengths", &NativeFlow::seq_ip_lengths)
+        .def_readonly("seq_trans_lengths", &NativeFlow::seq_trans_lengths)
+        .def_readonly("seq_app_lengths", &NativeFlow::seq_app_lengths)
+        .def_readonly("seq_timestamps", &NativeFlow::seq_timestamps)
+        .def_readonly("seq_payload_bytes", &NativeFlow::seq_payload_bytes)
+        .def_readonly("seq_tcp_flags", &NativeFlow::seq_tcp_flags)
+        .def_readonly("seq_tcp_windows", &NativeFlow::seq_tcp_windows)
+        .def_readonly("is_quic", &NativeFlow::is_quic)
+        .def_readonly("quic_dcid_len", &NativeFlow::quic_dcid_len)
+        .def_readonly("packets", &NativeFlow::packets)
+        .def_property_readonly("packet_count", [](const NativeFlow& f) {
+            return f.metrics.packet_count;
+        })
+        .def_property_readonly("duration", [](const NativeFlow& f) {
+            return f.end_time - f.start_time;
+        })
+        .def("add_packet", [](NativeFlow& self, NativeParsedPacket pkt) {
+            self.add_packet(std::move(pkt));
+        }, py::arg("pkt"))
+        .def("update_tcp_state", &NativeFlow::update_tcp_state,
+             py::arg("pkt"), py::arg("direction"))
+        .def("is_tcp_closed", &NativeFlow::is_tcp_closed);
+
+    // ── NativeFlowManager ──
+    py::class_<NativeFlowManager>(m, "NativeFlowManager")
+        .def(py::init<>())
+        .def(py::init<const NativeFlowManagerConfig&>(), py::arg("config"))
+        .def("get_or_create", &NativeFlowManager::get_or_create,
+             py::arg("pkt"), py::return_value_policy::reference_internal)
+        .def("get_all_flows", [](NativeFlowManager& self) {
+            auto flows = self.get_all_flows();
+            py::list result;
+            for (auto* f : flows)
+                result.append(py::cast(f, py::return_value_policy::reference));
+            return result;
+        })
+        .def("flow_count", &NativeFlowManager::flow_count)
+        .def("total_flow_count", &NativeFlowManager::total_flow_count)
+        .def("clear", &NativeFlowManager::clear);
 }

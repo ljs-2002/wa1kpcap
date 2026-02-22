@@ -23,6 +23,7 @@ set(NATIVE_SOURCES
     yaml_loader.cpp
     bpf_filter.cpp
     flow_buffer.cpp
+    flow_manager.cpp
     expression_eval.cpp
     hardcoded_parsers.cpp
 )
