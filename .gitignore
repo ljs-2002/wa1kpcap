@@ -86,3 +86,6 @@ CLAUDE.md
 plan_context.md
 context.md
 test.csv
+
+# Git worktrees
+.worktrees/
