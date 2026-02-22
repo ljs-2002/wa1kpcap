@@ -173,6 +173,31 @@ struct NativeFlowFeatures {
     int64_t total_bytes = 0;
 };
 
+// ── Aggregated flow info (protocol merge + ext_protocol) ──
+
+struct AggregatedFlowInfo {
+    // TLS (first-wins merge across all packets)
+    bool has_tls = false;
+    NativeTLSInfo tls;
+
+    // DNS (first-wins merge)
+    bool has_dns = false;
+    NativeDNSInfo dns;
+
+    // QUIC (first-wins merge + crypto_fragments accumulation)
+    bool has_quic = false;
+    NativeQUICInfo quic;
+
+    // Extended protocol stack (e.g., ["IPv4", "TCP", "TLS", "HTTPS"])
+    std::vector<std::string> ext_protocol;
+
+    // IP version from first packet (4 or 6)
+    int ip_version = 0;
+
+    // Whether TLS reassembly produced results (for lazy packet injection)
+    bool tls_reassembled = false;
+};
+
 // ── Native Flow ──
 
 struct NativeFlow {
@@ -363,6 +388,18 @@ struct NativeFlow {
 
         return f;
     }
+
+    // Protocol aggregation: first-wins merge of TLS/DNS/QUIC across packets
+    AggregatedFlowInfo aggregate() const;
+
+    // TLS stream reassembly over stored packets
+    void reassemble_tls(const ProtocolEngine& engine, AggregatedFlowInfo& info) const;
+
+    // QUIC cross-packet CRYPTO frame reassembly
+    void reassemble_quic_crypto(const ProtocolEngine& engine, AggregatedFlowInfo& info) const;
+
+    // Full aggregation: aggregate + TLS reassembly + QUIC crypto
+    AggregatedFlowInfo aggregate_full(const ProtocolEngine& engine) const;
 };
 
 // ── Flow Manager configuration ──

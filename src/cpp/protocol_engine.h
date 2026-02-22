@@ -119,6 +119,10 @@ public:
     NativeParsedPacket parse_from_protocol_struct(const uint8_t* buf, size_t len,
                                                    const std::string& start_protocol) const;
 
+    // Parse a TLS record buffer via tls_stream (repeat primitive), return struct with TLS filled.
+    // C++ native version (no py::bytes dependency).
+    NativeParsedPacket parse_tls_record_raw(const uint8_t* buf, size_t len) const;
+
     const YamlLoader& loader() const { return loader_; }
 
 private:

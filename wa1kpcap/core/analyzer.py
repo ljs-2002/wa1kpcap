@@ -459,24 +459,71 @@ class Wa1kPcap:
         native_flows = mgr.get_all_flows()
         flows = self._convert_native_flows(native_flows, mgr)
 
-        # Single pass: aggregation + TLS reassembly + lazy packets + features
+        # Single pass: C++ aggregation + lazy packets + features
         from wa1kpcap.core.flow import LazyPacketList
         from wa1kpcap.features.extractor import FlowFeatures
-        do_tls = (self._app_layer_mode == 0)
+        from wa1kpcap.core.packet import TLSInfo, DNSInfo, QUICInfo
+        parser = self._native_engine._parser
         verbose = self.verbose_mode
         save_raw = self.save_raw_bytes
         for py_flow, nf in zip(flows, native_flows):
-            # Protocol aggregation
-            self._aggregate_native_flow_info(py_flow, nf)
-            # TLS reassembly
-            if do_tls:
-                self._native_tls_reassembly_pass(py_flow, nf)
+            # C++ does aggregation + TLS reassembly + QUIC crypto in one call
+            info = nf.aggregate_full(parser)
+
+            # Set flow layers from aggregated info
+            if info.has_tls:
+                ct = info.tls
+                sni_val = ct.sni
+                py_flow.layers['tls_record'] = TLSInfo(
+                    version=ct.version if ct.version else None,
+                    content_type=ct.content_type if ct.content_type >= 0 else None,
+                    handshake_type=ct.handshake_type if ct.handshake_type >= 0 else None,
+                    record_length=ct.record_length,
+                    sni=[sni_val] if sni_val else [],
+                    cipher_suites=list(ct.cipher_suites) if ct.cipher_suites else [],
+                    cipher_suite=ct.cipher_suite if ct.cipher_suite >= 0 else None,
+                    alpn=list(ct.alpn) if ct.alpn else [],
+                    signature_algorithms=list(ct.signature_algorithms) if ct.signature_algorithms else [],
+                    supported_groups=list(ct.supported_groups) if ct.supported_groups else [],
+                )
+            if info.has_dns:
+                cd = info.dns
+                py_flow.layers['dns'] = DNSInfo(
+                    queries=list(cd.queries) if cd.queries else [],
+                    response_code=cd.response_code,
+                    question_count=cd.question_count,
+                    answer_count=cd.answer_count,
+                    authority_count=cd.authority_count,
+                    additional_count=cd.additional_count,
+                    flags=cd.flags,
+                )
+            if info.has_quic:
+                cq = info.quic
+                py_flow.layers['quic'] = QUICInfo(
+                    is_long_header=cq.is_long_header,
+                    packet_type=cq.packet_type,
+                    version=cq.version,
+                    dcid=bytes(cq.dcid) if cq.dcid else b'',
+                    scid=bytes(cq.scid) if cq.scid else b'',
+                    dcid_len=cq.dcid_len,
+                    scid_len=cq.scid_len,
+                    sni=cq.sni if cq.sni else None,
+                    alpn=list(cq.alpn) if cq.alpn else None,
+                    cipher_suites=list(cq.cipher_suites) if cq.cipher_suites else None,
+                    version_str=cq.version_str if cq.version_str else '',
+                    packet_type_str=cq.packet_type_str if cq.packet_type_str else '',
+                )
+
+            py_flow._ip_version = info.ip_version
+            py_flow.ext_protocol = list(info.ext_protocol)
+
             # Lazy packet list
             lazy = LazyPacketList(nf.packets, mgr)
-            reassembled_tls = getattr(py_flow, '_reassembled_tls', None)
-            if reassembled_tls is not None:
-                lazy.add_post_hook(_inject_tls_into_packets, reassembled_tls)
+            if info.tls_reassembled and py_flow.tls is not None:
+                py_flow._reassembled_tls = py_flow.tls
+                lazy.add_post_hook(_inject_tls_into_packets, py_flow.tls)
             py_flow.packets = lazy
+
             # Features
             if verbose:
                 py_flow._verbose = True
@@ -541,14 +588,6 @@ class Wa1kPcap:
             # QUIC flow state
             flow._is_quic = nf.is_quic
             flow._quic_dcid_len = nf.quic_dcid_len
-
-            # IP version hint for build_ext_protocol (avoids needing packets)
-            if nf.packets:
-                first_pkt = nf.packets[0]
-                if first_pkt.ip is not None:
-                    flow._ip_version = 4
-                elif first_pkt.ip6 is not None:
-                    flow._ip_version = 6
 
             py_flows.append(flow)
 

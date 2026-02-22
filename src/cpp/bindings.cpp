@@ -1279,7 +1279,22 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
             }
 
             return stats;
-        });
+        })
+        .def("aggregate_full", [](const NativeFlow& self, const NativeParser& parser) {
+            return self.aggregate_full(parser.engine());
+        }, py::arg("parser"));
+
+    // ── AggregatedFlowInfo ──
+    py::class_<AggregatedFlowInfo>(m, "AggregatedFlowInfo")
+        .def_readonly("has_tls", &AggregatedFlowInfo::has_tls)
+        .def_readonly("tls", &AggregatedFlowInfo::tls)
+        .def_readonly("has_dns", &AggregatedFlowInfo::has_dns)
+        .def_readonly("dns", &AggregatedFlowInfo::dns)
+        .def_readonly("has_quic", &AggregatedFlowInfo::has_quic)
+        .def_readonly("quic", &AggregatedFlowInfo::quic)
+        .def_readonly("ext_protocol", &AggregatedFlowInfo::ext_protocol)
+        .def_readonly("ip_version", &AggregatedFlowInfo::ip_version)
+        .def_readonly("tls_reassembled", &AggregatedFlowInfo::tls_reassembled);
 
     // ── NativeFlowManager ──
     py::class_<NativeFlowManager>(m, "NativeFlowManager")

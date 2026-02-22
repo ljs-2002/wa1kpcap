@@ -2414,3 +2414,11 @@ NativeParsedPacket NativeParser::parse_tls_record(py::bytes buf) {
     extract_tls_from_repeat_fields(pr.fields, pkt);
     return pkt;
 }
+
+NativeParsedPacket ProtocolEngine::parse_tls_record_raw(const uint8_t* buf, size_t len) const {
+    auto pr = parse_layer("tls_stream", buf, len, buf, len);
+
+    NativeParsedPacket pkt;
+    extract_tls_from_repeat_fields(pr.fields, pkt);
+    return pkt;
+}
