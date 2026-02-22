@@ -1234,7 +1234,52 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def("update_tcp_state", &NativeFlow::update_tcp_state,
              py::arg("pkt"), py::arg("direction"))
         .def("is_tcp_closed", &NativeFlow::is_tcp_closed)
-        .def("compute_features", &NativeFlow::compute_features);
+        .def("compute_features", &NativeFlow::compute_features)
+        .def("compute_features_dict", [](const NativeFlow& self) -> py::dict {
+            auto f = self.compute_features();
+            py::dict stats;
+
+            if (f.has_packet_lengths)
+                stats["packet_lengths"] = stats_to_pydict(f.packet_lengths);
+            if (f.has_ip_lengths)
+                stats["ip_lengths"] = stats_to_pydict(f.ip_lengths);
+            if (f.has_trans_lengths)
+                stats["trans_lengths"] = stats_to_pydict(f.trans_lengths);
+            if (f.has_app_lengths)
+                stats["app_lengths"] = stats_to_pydict(f.app_lengths);
+            if (f.has_iats)
+                stats["iats"] = stats_to_pydict(f.iats);
+            if (f.has_payload_bytes)
+                stats["payload_bytes"] = stats_to_pydict(f.payload_bytes);
+            if (f.has_tcp_flags)
+                stats["tcp_flags"] = stats_to_pydict(f.tcp_flags);
+            if (f.has_tcp_window)
+                stats["tcp_window"] = stats_to_pydict(f.tcp_window);
+
+            // Basic flow stats — derive from C++ structs directly
+            if (f.has_packet_lengths) {
+                stats["packet_count"] = f.packet_lengths.n;
+                stats["total_bytes"] = static_cast<int64_t>(f.packet_lengths.total);
+                double up_count = static_cast<double>(f.packet_lengths.n_up);
+                double down_count = static_cast<double>(f.packet_lengths.n_dn);
+                stats["up_down_pkt_ratio"] = down_count > 0.0 ? up_count / down_count : 0.0;
+                stats["up_down_byte_ratio"] = f.packet_lengths.dn_total > 0.0
+                    ? f.packet_lengths.up_total / f.packet_lengths.dn_total : 0.0;
+            } else {
+                stats["packet_count"] = f.packet_count;
+                stats["total_bytes"] = f.total_bytes;
+                stats["up_down_pkt_ratio"] = 0.0;
+                stats["up_down_byte_ratio"] = 0.0;
+            }
+
+            if (f.has_iats) {
+                stats["duration"] = f.iats.total;
+            } else {
+                stats["duration"] = f.duration;
+            }
+
+            return stats;
+        });
 
     // ── NativeFlowManager ──
     py::class_<NativeFlowManager>(m, "NativeFlowManager")

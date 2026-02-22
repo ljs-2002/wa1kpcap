@@ -459,42 +459,36 @@ class Wa1kPcap:
         native_flows = mgr.get_all_flows()
         flows = self._convert_native_flows(native_flows, mgr)
 
-        # Protocol aggregation (iterate C++ stored packets per flow)
-        for py_flow, nf in zip(flows, native_flows):
-            self._aggregate_native_flow_info(py_flow, nf)
-
-        # TLS reassembly post-processing (works on C++ packets directly)
-        if self._app_layer_mode == 0:
-            for py_flow, nf in zip(flows, native_flows):
-                self._native_tls_reassembly_pass(py_flow, nf)
-
-        # Assign lazy packet lists — defers NativeParsedPacket → ParsedPacket
-        # conversion until flow.packets is actually accessed.
+        # Single pass: aggregation + TLS reassembly + lazy packets + features
         from wa1kpcap.core.flow import LazyPacketList
+        from wa1kpcap.features.extractor import FlowFeatures
+        do_tls = (self._app_layer_mode == 0)
+        verbose = self.verbose_mode
+        save_raw = self.save_raw_bytes
         for py_flow, nf in zip(flows, native_flows):
+            # Protocol aggregation
+            self._aggregate_native_flow_info(py_flow, nf)
+            # TLS reassembly
+            if do_tls:
+                self._native_tls_reassembly_pass(py_flow, nf)
+            # Lazy packet list
             lazy = LazyPacketList(nf.packets, mgr)
-            # If TLS reassembly produced results, inject into packets on materialization
             reassembled_tls = getattr(py_flow, '_reassembled_tls', None)
             if reassembled_tls is not None:
                 lazy.add_post_hook(_inject_tls_into_packets, reassembled_tls)
             py_flow.packets = lazy
+            # Features
+            if verbose:
+                py_flow._verbose = True
+                py_flow._save_raw = save_raw
+            stats_dict = nf.compute_features_dict()
+            features = FlowFeatures()
+            features._statistics = stats_dict
+            py_flow.features = features
 
         # Post-parse app-layer filtering (e.g., bpf_filter="tls")
         if self._packet_filter and self._packet_filter.has_app_layer:
             flows = self._post_filter_flows(flows)
-
-        # Extract features using C++ pre-computed stats
-        from wa1kpcap.features.extractor import FlowFeatures
-        for py_flow, nf in zip(flows, native_flows):
-            if self.verbose_mode:
-                py_flow._verbose = True
-                py_flow._save_raw = self.save_raw_bytes
-            # Compute all stats in C++ (IATs, packet_lengths, etc.)
-            native_feat = nf.compute_features()
-            features = FlowFeatures.from_native_features(native_feat)
-            if self._feature_extractor.compute_statistics:
-                features.compute_statistics()
-            py_flow.features = features
 
         self._stats['flows_created'] += len(flows)
 
@@ -544,16 +538,6 @@ class Wa1kPcap:
             m.max_window = nm.max_window
             m.sum_window = nm.sum_window
 
-            # Copy sequence accumulators (used by FlowFeatures.from_flow fast path)
-            flow._seq_packet_lengths = list(nf.seq_packet_lengths)
-            flow._seq_ip_lengths = list(nf.seq_ip_lengths)
-            flow._seq_trans_lengths = list(nf.seq_trans_lengths)
-            flow._seq_app_lengths = list(nf.seq_app_lengths)
-            flow._seq_timestamps = list(nf.seq_timestamps)
-            flow._seq_payload_bytes = list(nf.seq_payload_bytes)
-            flow._seq_tcp_flags = list(nf.seq_tcp_flags)
-            flow._seq_tcp_windows = list(nf.seq_tcp_windows)
-
             # QUIC flow state
             flow._is_quic = nf.is_quic
             flow._quic_dcid_len = nf.quic_dcid_len
@@ -576,79 +560,105 @@ class Wa1kPcap:
         Iterates the C++ stored packets in the NativeFlow and converts
         protocol-layer info (TLS, DNS, QUIC, HTTP) to Python ProtocolInfo
         objects, merging them into the flow's layers dict.
+
+        Uses inline first-wins logic to avoid creating intermediate objects
+        after the first packet for each protocol.
         """
-        from wa1kpcap.core.packet import (
-            _ProtocolInfoBase, TLSInfo, DNSInfo, QUICInfo,
-        )
+        from wa1kpcap.core.packet import TLSInfo, DNSInfo, QUICInfo
+
+        layers = flow.layers
+        tls_obj = None
+        dns_obj = None
+        quic_obj = None
 
         for cpkt in nf.packets:
             # TLS
             ct = cpkt.tls
             if ct is not None:
-                sni_val = ct.sni
-                sni_list = [sni_val] if sni_val and isinstance(sni_val, str) else []
-                tls = TLSInfo(
-                    version=ct.version if ct.version else None,
-                    content_type=ct.content_type if ct.content_type >= 0 else None,
-                    handshake_type=ct.handshake_type if ct.handshake_type >= 0 else None,
-                    record_length=ct.record_length,
-                    sni=sni_list,
-                    cipher_suites=list(ct.cipher_suites) if ct.cipher_suites else [],
-                    cipher_suite=ct.cipher_suite if ct.cipher_suite >= 0 else None,
-                    alpn=list(ct.alpn) if ct.alpn else [],
-                    signature_algorithms=list(ct.signature_algorithms) if ct.signature_algorithms else [],
-                    supported_groups=list(ct.supported_groups) if ct.supported_groups else [],
-                )
-                existing = flow.layers.get('tls_record')
-                if existing is None:
-                    flow.layers['tls_record'] = tls
+                if tls_obj is None:
+                    sni_val = ct.sni
+                    tls_obj = TLSInfo(
+                        version=ct.version if ct.version else None,
+                        content_type=ct.content_type if ct.content_type >= 0 else None,
+                        handshake_type=ct.handshake_type if ct.handshake_type >= 0 else None,
+                        record_length=ct.record_length,
+                        sni=[sni_val] if sni_val and isinstance(sni_val, str) else [],
+                        cipher_suites=list(ct.cipher_suites) if ct.cipher_suites else [],
+                        cipher_suite=ct.cipher_suite if ct.cipher_suite >= 0 else None,
+                        alpn=list(ct.alpn) if ct.alpn else [],
+                        signature_algorithms=list(ct.signature_algorithms) if ct.signature_algorithms else [],
+                        supported_groups=list(ct.supported_groups) if ct.supported_groups else [],
+                    )
+                    layers['tls_record'] = tls_obj
                 else:
-                    existing.merge(tls)
+                    # Inline first-wins merge: only fill None/empty fields
+                    if tls_obj.version is None and ct.version:
+                        tls_obj.version = ct.version
+                    if tls_obj.content_type is None and ct.content_type >= 0:
+                        tls_obj.content_type = ct.content_type
+                    if tls_obj.handshake_type is None and ct.handshake_type >= 0:
+                        tls_obj.handshake_type = ct.handshake_type
+                    if not tls_obj.sni and ct.sni:
+                        tls_obj.sni = [ct.sni]
+                    if not tls_obj.cipher_suites and ct.cipher_suites:
+                        tls_obj.cipher_suites = list(ct.cipher_suites)
+                    if tls_obj.cipher_suite is None and ct.cipher_suite >= 0:
+                        tls_obj.cipher_suite = ct.cipher_suite
+                    if not tls_obj.alpn and ct.alpn:
+                        tls_obj.alpn = list(ct.alpn)
 
             # DNS
             cd = cpkt.dns
             if cd is not None:
-                dns = DNSInfo(
-                    queries=list(cd.queries) if cd.queries else [],
-                    response_code=cd.response_code,
-                    question_count=cd.question_count,
-                    answer_count=cd.answer_count,
-                    authority_count=cd.authority_count,
-                    additional_count=cd.additional_count,
-                    flags=cd.flags,
-                )
-                existing = flow.layers.get('dns')
-                if existing is None:
-                    flow.layers['dns'] = dns
+                if dns_obj is None:
+                    dns_obj = DNSInfo(
+                        queries=list(cd.queries) if cd.queries else [],
+                        response_code=cd.response_code,
+                        question_count=cd.question_count,
+                        answer_count=cd.answer_count,
+                        authority_count=cd.authority_count,
+                        additional_count=cd.additional_count,
+                        flags=cd.flags,
+                    )
+                    layers['dns'] = dns_obj
                 else:
-                    existing.merge(dns)
+                    if not dns_obj.queries and cd.queries:
+                        dns_obj.queries = list(cd.queries)
+                    if dns_obj.response_code is None and cd.response_code is not None:
+                        dns_obj.response_code = cd.response_code
 
             # QUIC
             cq = cpkt.quic
             if cq is not None:
-                quic = QUICInfo(
-                    is_long_header=cq.is_long_header,
-                    packet_type=cq.packet_type,
-                    version=cq.version,
-                    dcid=bytes(cq.dcid) if cq.dcid else b'',
-                    scid=bytes(cq.scid) if cq.scid else b'',
-                    dcid_len=cq.dcid_len,
-                    scid_len=cq.scid_len,
-                    sni=cq.sni if cq.sni else None,
-                    alpn=list(cq.alpn) if cq.alpn else None,
-                    cipher_suites=list(cq.cipher_suites) if cq.cipher_suites else None,
-                    version_str=cq.version_str if cq.version_str else '',
-                    packet_type_str=cq.packet_type_str if cq.packet_type_str else '',
-                )
-                existing = flow.layers.get('quic')
-                if existing is None:
-                    flow.layers['quic'] = quic
+                if quic_obj is None:
+                    quic_obj = QUICInfo(
+                        is_long_header=cq.is_long_header,
+                        packet_type=cq.packet_type,
+                        version=cq.version,
+                        dcid=bytes(cq.dcid) if cq.dcid else b'',
+                        scid=bytes(cq.scid) if cq.scid else b'',
+                        dcid_len=cq.dcid_len,
+                        scid_len=cq.scid_len,
+                        sni=cq.sni if cq.sni else None,
+                        alpn=list(cq.alpn) if cq.alpn else None,
+                        cipher_suites=list(cq.cipher_suites) if cq.cipher_suites else None,
+                        version_str=cq.version_str if cq.version_str else '',
+                        packet_type_str=cq.packet_type_str if cq.packet_type_str else '',
+                    )
+                    layers['quic'] = quic_obj
                 else:
-                    existing.merge(quic)
-                # Accumulate crypto_fragments across packets (merge won't do this
-                # because crypto_fragments is [] not None)
+                    if quic_obj.sni is None and cq.sni:
+                        quic_obj.sni = cq.sni
+                    if quic_obj.alpn is None and cq.alpn:
+                        quic_obj.alpn = list(cq.alpn)
+                    if quic_obj.cipher_suites is None and cq.cipher_suites:
+                        quic_obj.cipher_suites = list(cq.cipher_suites)
+                    if not quic_obj.scid and cq.scid:
+                        quic_obj.scid = bytes(cq.scid)
+                        quic_obj.scid_len = cq.scid_len
+                # Accumulate crypto_fragments across packets
                 if cq.crypto_fragments:
-                    flow.layers['quic'].crypto_fragments.extend(
+                    quic_obj.crypto_fragments.extend(
                         (off, bytes(data)) for off, data in cq.crypto_fragments
                     )
 
@@ -656,17 +666,8 @@ class Wa1kPcap:
             # (via TLS reassembly or _parse_http). Skipped here.
 
         # QUIC: cross-packet CRYPTO frame reassembly
-        if flow.quic and flow.quic.sni is None:
+        if quic_obj is not None and quic_obj.sni is None:
             self._reassemble_quic_crypto(flow)
-
-        # QUIC: fill server SCID
-        if flow.quic and not flow.quic.scid:
-            for cpkt in nf.packets:
-                cq = cpkt.quic
-                if cq is not None and cq.scid:
-                    flow.quic.scid = bytes(cq.scid)
-                    flow.quic.scid_len = cq.scid_len
-                    break
 
         # Build extended protocol stack
         flow.build_ext_protocol()
@@ -684,8 +685,8 @@ class Wa1kPcap:
         # Check if this is a TLS-relevant flow
         port = flow.key.dst_port
         sport = flow.key.src_port
-        is_tls_port = port in (443, 465, 993, 995, 5061) or sport in (443, 465, 993, 995, 5061)
-        has_tls = is_tls_port or flow.tls is not None
+        _TLS_PORTS = (443, 465, 993, 995, 5061)
+        has_tls = port in _TLS_PORTS or sport in _TLS_PORTS or flow.tls is not None
 
         if not has_tls:
             # Check if any C++ packet detected TLS
@@ -704,6 +705,10 @@ class Wa1kPcap:
         shim = ParsedPacket.__new__(ParsedPacket)
         shim.layers = {}  # Required for property setters
 
+        # Reusable TCPInfo — mutate fields instead of creating new objects
+        shim_tcp = TCPInfo(sport=0, dport=0, seq=0, ack_num=0, flags=0, win=0, urgent=0, options=b'', _raw=b'')
+        shim.tcp = shim_tcp
+
         src_ip = flow.key.src_ip
         src_port = flow.key.src_port
 
@@ -712,11 +717,12 @@ class Wa1kPcap:
             if not tcp_data or cpkt.tcp is None:
                 continue
             ct = cpkt.tcp
-            shim.tcp = TCPInfo(
-                sport=ct.sport, dport=ct.dport, seq=ct.seq,
-                ack=ct.ack_num, flags=ct.flags, window=ct.win,
-                urgent=ct.urgent, options=b'', _raw=b'',
-            )
+            shim_tcp.sport = ct.sport
+            shim_tcp.dport = ct.dport
+            shim_tcp.seq = ct.seq
+            shim_tcp.ack_num = ct.ack_num
+            shim_tcp.flags = ct.flags
+            shim_tcp.win = ct.win
             shim.tls = None
             # Determine direction from flow key
             pkt_src_ip = cpkt.ip.src if cpkt.ip is not None else (cpkt.ip6.src if cpkt.ip6 is not None else '')
