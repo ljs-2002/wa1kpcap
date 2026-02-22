@@ -374,6 +374,44 @@ class Flow:
         if self.start_time == 0.0:
             self.start_time = time.time()
 
+    @classmethod
+    def _from_native(cls, key, start_time, end_time):
+        """Fast constructor for C++ pipeline — skips default_factory allocations."""
+        obj = object.__new__(cls)
+        obj.key = key
+        obj.start_time = start_time
+        obj.end_time = end_time
+        obj.packets = None
+        obj._raw_packets = None
+        obj.metrics = FlowMetrics()
+        obj.tcp_state = TCPState.CLOSED
+        obj.tcp_state_reverse = TCPState.CLOSED
+        obj.layers = {}
+        obj.features = None
+        obj.ext_protocol = None
+        obj._canonical_key = None
+        obj._next_seq = None
+        obj._last_seen = 0.0
+        obj._verbose = False
+        obj._save_raw = False
+        obj._is_quic = False
+        obj._quic_dcid_len = 0
+        obj._ip_version = 0
+        obj._seq_packet_lengths = None
+        obj._seq_ip_lengths = None
+        obj._seq_trans_lengths = None
+        obj._seq_app_lengths = None
+        obj._seq_timestamps = None
+        obj._seq_payload_bytes = None
+        obj._seq_tcp_flags = None
+        obj._seq_tcp_windows = None
+        obj._custom_features = None
+        obj._feature_initialized = False
+        obj._tls_incomplete_data = None
+        obj._tls_state = None
+        obj._reassembled_tls = None
+        return obj
+
     # Protocol property aliases — source of truth is self.layers
     @property
     def tls(self):

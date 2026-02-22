@@ -1311,7 +1311,92 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         })
         .def("flow_count", &NativeFlowManager::flow_count)
         .def("total_flow_count", &NativeFlowManager::total_flow_count)
-        .def("clear", &NativeFlowManager::clear);
+        .def("clear", &NativeFlowManager::clear)
+        .def("compute_all_features_dicts", [](NativeFlowManager& self) -> py::list {
+            auto flows = self.get_all_flows();
+            py::list result(flows.size());
+            for (size_t i = 0; i < flows.size(); i++) {
+                auto f = flows[i]->compute_features();
+                py::dict stats;
+
+                if (f.has_packet_lengths)
+                    stats["packet_lengths"] = stats_to_pydict(f.packet_lengths);
+                if (f.has_ip_lengths)
+                    stats["ip_lengths"] = stats_to_pydict(f.ip_lengths);
+                if (f.has_trans_lengths)
+                    stats["trans_lengths"] = stats_to_pydict(f.trans_lengths);
+                if (f.has_app_lengths)
+                    stats["app_lengths"] = stats_to_pydict(f.app_lengths);
+                if (f.has_iats)
+                    stats["iats"] = stats_to_pydict(f.iats);
+                if (f.has_payload_bytes)
+                    stats["payload_bytes"] = stats_to_pydict(f.payload_bytes);
+                if (f.has_tcp_flags)
+                    stats["tcp_flags"] = stats_to_pydict(f.tcp_flags);
+                if (f.has_tcp_window)
+                    stats["tcp_window"] = stats_to_pydict(f.tcp_window);
+
+                if (f.has_packet_lengths) {
+                    stats["packet_count"] = f.packet_lengths.n;
+                    stats["total_bytes"] = static_cast<int64_t>(f.packet_lengths.total);
+                    double up_count = static_cast<double>(f.packet_lengths.n_up);
+                    double down_count = static_cast<double>(f.packet_lengths.n_dn);
+                    stats["up_down_pkt_ratio"] = down_count > 0.0 ? up_count / down_count : 0.0;
+                    stats["up_down_byte_ratio"] = f.packet_lengths.dn_total > 0.0
+                        ? f.packet_lengths.up_total / f.packet_lengths.dn_total : 0.0;
+                } else {
+                    stats["packet_count"] = f.packet_count;
+                    stats["total_bytes"] = f.total_bytes;
+                    stats["up_down_pkt_ratio"] = 0.0;
+                    stats["up_down_byte_ratio"] = 0.0;
+                }
+
+                if (f.has_iats) {
+                    stats["duration"] = f.iats.total;
+                } else {
+                    stats["duration"] = f.duration;
+                }
+
+                result[i] = stats;
+            }
+            return result;
+        })
+        .def("aggregate_all", [](NativeFlowManager& self, const NativeParser& parser) -> py::list {
+            auto flows = self.get_all_flows();
+            const auto& engine = parser.engine();
+            py::list result(flows.size());
+            for (size_t i = 0; i < flows.size(); i++) {
+                result[i] = py::cast(flows[i]->aggregate_full(engine));
+            }
+            return result;
+        }, py::arg("parser"))
+        .def("export_all_flow_data", [](NativeFlowManager& self) -> py::list {
+            // Returns list of tuples: (src_ip, dst_ip, src_port, dst_port, protocol, vlan_id,
+            //                          start_time, end_time,
+            //                          packet_count, byte_count, up_pkt, up_byte, dn_pkt, dn_byte,
+            //                          syn, fin, rst, ack, psh, urg, retrans, ooo,
+            //                          min_win, max_win, sum_win,
+            //                          is_quic, quic_dcid_len)
+            auto flows = self.get_all_flows();
+            py::list result(flows.size());
+            for (size_t i = 0; i < flows.size(); i++) {
+                const auto& f = *flows[i];
+                const auto& k = f.key;
+                const auto& m = f.metrics;
+                result[i] = py::make_tuple(
+                    k.src_ip, k.dst_ip, k.src_port, k.dst_port, k.protocol, k.vlan_id,
+                    f.start_time, f.end_time,
+                    m.packet_count, m.byte_count,
+                    m.up_packet_count, m.up_byte_count,
+                    m.down_packet_count, m.down_byte_count,
+                    m.syn_count, m.fin_count, m.rst_count, m.ack_count,
+                    m.psh_count, m.urg_count, m.retrans_count, m.out_of_order_count,
+                    m.min_window, m.max_window, m.sum_window,
+                    f.is_quic, f.quic_dcid_len
+                );
+            }
+            return result;
+        });
 
     // ── convert_to_parsed_packet: NativeParsedPacket → Python ParsedPacket ──
     m.def("convert_to_parsed_packet", [](const NativeParsedPacket& pkt) {

@@ -459,17 +459,20 @@ class Wa1kPcap:
         native_flows = mgr.get_all_flows()
         flows = self._convert_native_flows(native_flows, mgr)
 
-        # Single pass: C++ aggregation + lazy packets + features
+        # Batch C++ operations: aggregation + features (1 pybind11 call each)
         from wa1kpcap.core.flow import LazyPacketList
         from wa1kpcap.features.extractor import FlowFeatures
         from wa1kpcap.core.packet import TLSInfo, DNSInfo, QUICInfo
         parser = self._native_engine._parser
         verbose = self.verbose_mode
         save_raw = self.save_raw_bytes
-        for py_flow, nf in zip(flows, native_flows):
-            # C++ does aggregation + TLS reassembly + QUIC crypto in one call
-            info = nf.aggregate_full(parser)
 
+        # Batch aggregate: one C++ call for all flows
+        all_infos = mgr.aggregate_all(parser)
+        # Batch features: one C++ call for all flows
+        all_stats_dicts = mgr.compute_all_features_dicts()
+
+        for py_flow, nf, info, stats_dict in zip(flows, native_flows, all_infos, all_stats_dicts):
             # Set flow layers from aggregated info
             if info.has_tls:
                 ct = info.tls
@@ -528,7 +531,6 @@ class Wa1kPcap:
             if verbose:
                 py_flow._verbose = True
                 py_flow._save_raw = save_raw
-            stats_dict = nf.compute_features_dict()
             features = FlowFeatures()
             features._statistics = stats_dict
             py_flow.features = features
@@ -544,52 +546,47 @@ class Wa1kPcap:
     def _convert_native_flows(self, native_flows, mgr) -> list[Flow]:
         """Convert list of NativeFlow pointers to Python Flow objects.
 
-        Copies key, metrics, timestamps, and sequence accumulators.
-        Does NOT copy individual packets (lazy loading deferred to later phase).
+        Uses batch export_all_flow_data() to minimize pybind11 boundary crossings.
         """
         from wa1kpcap.core.flow import Flow, FlowKey, FlowMetrics
 
+        all_data = mgr.export_all_flow_data()
+        _from_native = Flow._from_native
+        _FlowKey = FlowKey
+
         py_flows = []
-        for nf in native_flows:
-            nk = nf.key
-            key = FlowKey(
-                src_ip=nk.src_ip,
-                dst_ip=nk.dst_ip,
-                src_port=nk.src_port,
-                dst_port=nk.dst_port,
-                protocol=nk.protocol,
-                vlan_id=nk.vlan_id,
+        _append = py_flows.append
+        for d in all_data:
+            key = _FlowKey(
+                src_ip=d[0], dst_ip=d[1],
+                src_port=d[2], dst_port=d[3],
+                protocol=d[4], vlan_id=d[5],
             )
+            flow = _from_native(key, d[6], d[7])
 
-            flow = Flow(key=key, start_time=nf.start_time, _verbose=False, _save_raw=False)
-            flow.end_time = nf.end_time
-
-            # Copy metrics
-            nm = nf.metrics
             m = flow.metrics
-            m.packet_count = nm.packet_count
-            m.byte_count = nm.byte_count
-            m.up_packet_count = nm.up_packet_count
-            m.up_byte_count = nm.up_byte_count
-            m.down_packet_count = nm.down_packet_count
-            m.down_byte_count = nm.down_byte_count
-            m.syn_count = nm.syn_count
-            m.fin_count = nm.fin_count
-            m.rst_count = nm.rst_count
-            m.ack_count = nm.ack_count
-            m.psh_count = nm.psh_count
-            m.urg_count = nm.urg_count
-            m.retrans_count = nm.retrans_count
-            m.out_of_order_count = nm.out_of_order_count
-            m.min_window = nm.min_window
-            m.max_window = nm.max_window
-            m.sum_window = nm.sum_window
+            m.packet_count = d[8]
+            m.byte_count = d[9]
+            m.up_packet_count = d[10]
+            m.up_byte_count = d[11]
+            m.down_packet_count = d[12]
+            m.down_byte_count = d[13]
+            m.syn_count = d[14]
+            m.fin_count = d[15]
+            m.rst_count = d[16]
+            m.ack_count = d[17]
+            m.psh_count = d[18]
+            m.urg_count = d[19]
+            m.retrans_count = d[20]
+            m.out_of_order_count = d[21]
+            m.min_window = d[22]
+            m.max_window = d[23]
+            m.sum_window = d[24]
 
-            # QUIC flow state
-            flow._is_quic = nf.is_quic
-            flow._quic_dcid_len = nf.quic_dcid_len
+            flow._is_quic = d[25]
+            flow._quic_dcid_len = d[26]
 
-            py_flows.append(flow)
+            _append(flow)
 
         return py_flows
 
