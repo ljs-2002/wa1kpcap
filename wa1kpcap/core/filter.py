@@ -111,9 +111,20 @@ class IPCondition(FilterCondition):
             result = False
 
             if eth_type == 0x0800:  # IPv4
-                ip_hdr_len = (buf[14] & 0x0F) * 4
                 src_ip = bytes(buf[26:26+4])
                 dst_ip = bytes(buf[30:30+4])
+
+                if self.any_ips:
+                    result = (src_ip in self._ip_bytes(self.any_ips) or
+                             dst_ip in self._ip_bytes(self.any_ips))
+                if self.src_ips:
+                    result = result or (src_ip in self._ip_bytes(self.src_ips))
+                if self.dst_ips:
+                    result = result or (dst_ip in self._ip_bytes(self.dst_ips))
+
+            elif eth_type == 0x86DD and len(buf) >= 54:  # IPv6
+                src_ip = bytes(buf[22:22+16])
+                dst_ip = bytes(buf[38:38+16])
 
                 if self.any_ips:
                     result = (src_ip in self._ip_bytes(self.any_ips) or
@@ -144,13 +155,17 @@ class IPCondition(FilterCondition):
     @staticmethod
     def _ip_bytes(ip_set: set[str]) -> set[bytes]:
         """Convert IP strings to bytes."""
+        import socket
         result = set()
         for ip in ip_set:
             try:
-                parts = ip.split('.')
-                if len(parts) == 4:
-                    result.add(bytes(int(p) for p in parts))
-            except (ValueError, AttributeError):
+                if ':' in ip:
+                    result.add(socket.inet_pton(socket.AF_INET6, ip))
+                else:
+                    parts = ip.split('.')
+                    if len(parts) == 4:
+                        result.add(bytes(int(p) for p in parts))
+            except (ValueError, AttributeError, OSError):
                 pass
         return result
 
@@ -303,6 +318,7 @@ class BPFCompiler:
         (r'\bvlan\b', 'VLAN'),
         (r'\bgre\b', 'GRE'),
         (r'\bmpls\b', 'MPLS'),
+        (r'[0-9a-f]{0,4}:[0-9a-f]{0,4}:[0-9a-f:]*[0-9a-f]', 'IPV6_ADDR'),
         (r'\d+\.\d+\.\d+\.\d+', 'IPV4_ADDR'),
         (r'\d+', 'NUMBER'),
         (r'\s+', 'WS'),
@@ -499,8 +515,11 @@ class BPFCompiler:
         # host <ip>
         if tok_type == 'HOST':
             self._consume()
-            _, addr = self._consume('IPV4_ADDR')
-            return IPCondition(any_ips={addr})
+            next_type = self._peek()
+            if next_type in ('IPV4_ADDR', 'IPV6_ADDR'):
+                _, addr = self._consume()
+                return IPCondition(any_ips={addr})
+            raise ValueError("Expected IP address after 'host'")
 
         # src <ip> | src port <n>
         if tok_type == 'SRC':
@@ -509,8 +528,8 @@ class BPFCompiler:
                 self._consume('PORT')
                 _, num = self._consume('NUMBER')
                 return PortCondition(src_ports={int(num)})
-            if self._peek() == 'IPV4_ADDR':
-                _, addr = self._consume('IPV4_ADDR')
+            if self._peek() in ('IPV4_ADDR', 'IPV6_ADDR'):
+                _, addr = self._consume()
                 return IPCondition(src_ips={addr})
             raise ValueError("Expected IP address or 'port' after 'src'")
 
@@ -521,13 +540,13 @@ class BPFCompiler:
                 self._consume('PORT')
                 _, num = self._consume('NUMBER')
                 return PortCondition(dst_ports={int(num)})
-            if self._peek() == 'IPV4_ADDR':
-                _, addr = self._consume('IPV4_ADDR')
+            if self._peek() in ('IPV4_ADDR', 'IPV6_ADDR'):
+                _, addr = self._consume()
                 return IPCondition(dst_ips={addr})
             raise ValueError("Expected IP address or 'port' after 'dst'")
 
         # Standalone IP address (treat as host)
-        if tok_type == 'IPV4_ADDR':
+        if tok_type in ('IPV4_ADDR', 'IPV6_ADDR'):
             _, addr = self._consume()
             return IPCondition(any_ips={addr})
 
@@ -646,7 +665,10 @@ class PacketFilter:
 # ============================================================
 
 def _ip_str_to_bytes(ip: str) -> bytes:
-    """Convert dotted-quad IP string to 4-byte bytes (compile-time helper)."""
+    """Convert IP string to bytes (compile-time helper). Supports IPv4 and IPv6."""
+    import socket
+    if ':' in ip:
+        return socket.inet_pton(socket.AF_INET6, ip)
     parts = ip.split('.')
     return bytes(int(p) for p in parts)
 
@@ -769,23 +791,36 @@ def _compile_fast_node(cond: FilterCondition, lt_ref: list[int]) -> Callable[[by
         return _f
 
     if isinstance(cond, IPCondition):
-        # Pre-compute IP bytes at compile time
+        # Pre-compute IP bytes at compile time, split by address family
+        all_ips = set()
+        for s in (cond.any_ips, cond.src_ips, cond.dst_ips):
+            all_ips.update(s)
+        has_v6 = any(':' in ip for ip in all_ips)
+
         any_set = frozenset(_ip_str_to_bytes(ip) for ip in cond.any_ips) if cond.any_ips else None
         src_set = frozenset(_ip_str_to_bytes(ip) for ip in cond.src_ips) if cond.src_ips else None
         dst_set = frozenset(_ip_str_to_bytes(ip) for ip in cond.dst_ips) if cond.dst_ips else None
         negate = cond.negate
 
-        def _f(buf: bytes, _any=any_set, _src=src_set, _dst=dst_set, _neg=negate, _lt=lt_ref) -> bool:
+        def _f(buf: bytes, _any=any_set, _src=src_set, _dst=dst_set, _neg=negate, _lt=lt_ref, _v6=has_v6) -> bool:
             r = _resolve_ethertype(buf, _lt)
             if r is None:
                 return _neg
             e0, e1, ip_off = r
-            if e0 != 0x08 or e1 != 0x00:
-                return _neg  # not IPv4
-            if len(buf) < ip_off + 20:
+            if e0 == 0x08 and e1 == 0x00:
+                # IPv4: src at +12 (4 bytes), dst at +16 (4 bytes)
+                if len(buf) < ip_off + 20:
+                    return _neg
+                src = bytes(buf[ip_off + 12:ip_off + 16])
+                dst = bytes(buf[ip_off + 16:ip_off + 20])
+            elif e0 == 0x86 and e1 == 0xDD:
+                # IPv6: src at +8 (16 bytes), dst at +24 (16 bytes)
+                if len(buf) < ip_off + 40:
+                    return _neg
+                src = bytes(buf[ip_off + 8:ip_off + 24])
+                dst = bytes(buf[ip_off + 24:ip_off + 40])
+            else:
                 return _neg
-            src = bytes(buf[ip_off + 12:ip_off + 16])
-            dst = bytes(buf[ip_off + 16:ip_off + 20])
             result = False
             if _any:
                 result = src in _any or dst in _any

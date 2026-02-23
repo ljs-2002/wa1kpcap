@@ -117,7 +117,7 @@ public:
         TCP, UDP, ICMP, ICMPV6, ARP, IP, IPV6,
         HOST, SRC, DST, PORT,
         TLS, HTTP, DNS, DHCP, DHCPV6, VLAN, GRE, VXLAN, MPLS,
-        IPV4_ADDR, NUMBER, END
+        IPV4_ADDR, IPV6_ADDR, NUMBER, END
     };
     struct Token {
         TokenType type;

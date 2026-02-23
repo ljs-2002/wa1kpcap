@@ -146,6 +146,16 @@ std::vector<NativeFilter::Token> NativeFilter::tokenize(const std::string& s) {
             while (i < lower.size() && (std::isalnum(lower[i]) || lower[i] == '_')) i++;
             std::string word = lower.substr(start, i - start);
 
+            // Check if this is actually the start of an IPv6 address (e.g. fe80::1, abcd:...)
+            if (i < lower.size() && lower[i] == ':') {
+                // Rescan as IPv6: hex digits and colons
+                i = start;
+                while (i < lower.size() && (std::isxdigit(lower[i]) || lower[i] == ':')) i++;
+                std::string addr = lower.substr(start, i - start);
+                tokens.push_back({TokenType::IPV6_ADDR, addr});
+                continue;
+            }
+
             if (word == "and") tokens.push_back({TokenType::AND, word});
             else if (word == "or") tokens.push_back({TokenType::OR, word});
             else if (word == "not") tokens.push_back({TokenType::NOT, word});
@@ -173,20 +183,44 @@ std::vector<NativeFilter::Token> NativeFilter::tokenize(const std::string& s) {
             continue;
         }
 
-        // Numbers and IP addresses
-        if (std::isdigit(lower[i])) {
+        // Numbers, IP addresses (IPv4 and IPv6)
+        if (std::isxdigit(lower[i]) || lower[i] == ':') {
             size_t start = i;
             bool has_dot = false;
+            bool has_colon = false;
             int dot_count = 0;
-            while (i < lower.size() && (std::isdigit(lower[i]) || lower[i] == '.')) {
-                if (lower[i] == '.') { has_dot = true; dot_count++; }
-                i++;
+
+            // Check if this starts with :: (IPv6 shorthand)
+            if (lower[i] == ':' && i + 1 < lower.size() && lower[i + 1] == ':') {
+                has_colon = true;
+            } else if (lower[i] == ':') {
+                // Single colon at start — not valid, fall through to error
+                throw std::runtime_error(std::string("Unexpected character in filter: ") + lower[i]);
             }
-            std::string num = lower.substr(start, i - start);
-            if (dot_count == 3) {
-                tokens.push_back({TokenType::IPV4_ADDR, num});
+
+            // Scan ahead to determine if this is IPv4, IPv6, or a plain number
+            size_t scan = i;
+            while (scan < lower.size() && (std::isxdigit(lower[scan]) || lower[scan] == '.' || lower[scan] == ':')) {
+                if (lower[scan] == '.') { has_dot = true; dot_count++; }
+                if (lower[scan] == ':') has_colon = true;
+                scan++;
+            }
+
+            if (has_colon) {
+                // IPv6 address: consume hex digits and colons
+                while (i < lower.size() && (std::isxdigit(lower[i]) || lower[i] == ':')) i++;
+                std::string addr = lower.substr(start, i - start);
+                tokens.push_back({TokenType::IPV6_ADDR, addr});
+            } else if (dot_count == 3) {
+                // IPv4 address
+                while (i < lower.size() && (std::isdigit(lower[i]) || lower[i] == '.')) i++;
+                tokens.push_back({TokenType::IPV4_ADDR, lower.substr(start, i - start)});
+            } else if (!has_dot && std::isdigit(lower[start])) {
+                // Plain number
+                while (i < lower.size() && std::isdigit(lower[i])) i++;
+                tokens.push_back({TokenType::NUMBER, lower.substr(start, i - start)});
             } else {
-                tokens.push_back({TokenType::NUMBER, num});
+                throw std::runtime_error(std::string("Invalid token in filter: ") + lower.substr(start, scan - start));
             }
             continue;
         }
@@ -402,7 +436,7 @@ std::unique_ptr<FilterNode> NativeFilter::parse_atom() {
     }
     case TokenType::HOST: {
         consume();
-        if (peek().type != TokenType::IPV4_ADDR) {
+        if (peek().type != TokenType::IPV4_ADDR && peek().type != TokenType::IPV6_ADDR) {
             throw std::runtime_error("Expected IP address after 'host'");
         }
         auto addr = consume().value;
@@ -423,7 +457,7 @@ std::unique_ptr<FilterNode> NativeFilter::parse_atom() {
             n->src_ports.insert(port);
             return n;
         }
-        if (peek().type == TokenType::IPV4_ADDR) {
+        if (peek().type == TokenType::IPV4_ADDR || peek().type == TokenType::IPV6_ADDR) {
             auto addr = consume().value;
             auto n = std::make_unique<IPFilterNode>();
             n->src_ips.insert(addr);
@@ -444,7 +478,7 @@ std::unique_ptr<FilterNode> NativeFilter::parse_atom() {
             n->dst_ports.insert(port);
             return n;
         }
-        if (peek().type == TokenType::IPV4_ADDR) {
+        if (peek().type == TokenType::IPV4_ADDR || peek().type == TokenType::IPV6_ADDR) {
             auto addr = consume().value;
             auto n = std::make_unique<IPFilterNode>();
             n->dst_ips.insert(addr);
@@ -453,7 +487,8 @@ std::unique_ptr<FilterNode> NativeFilter::parse_atom() {
         }
         throw std::runtime_error("Expected IP address or 'port' after 'dst'");
     }
-    case TokenType::IPV4_ADDR: {
+    case TokenType::IPV4_ADDR:
+    case TokenType::IPV6_ADDR: {
         auto addr = consume().value;
         auto n = std::make_unique<IPFilterNode>();
         n->any_ips.insert(addr);
@@ -488,16 +523,64 @@ static bool parse_ipv4_to_bytes(const std::string& addr, uint8_t out[4]) {
     return true;
 }
 
+static bool parse_ipv6_to_bytes(const std::string& addr, uint8_t out[16]) {
+    std::memset(out, 0, 16);
+    auto dcolon = addr.find("::");
+    std::string left_part, right_part;
+    if (dcolon != std::string::npos) {
+        left_part = addr.substr(0, dcolon);
+        right_part = addr.substr(dcolon + 2);
+    } else {
+        left_part = addr;
+    }
+
+    auto parse_groups = [](const std::string& s, std::vector<uint16_t>& groups) {
+        if (s.empty()) return true;
+        std::istringstream ss(s);
+        std::string group;
+        while (std::getline(ss, group, ':')) {
+            if (group.empty()) return false;
+            unsigned long val = std::strtoul(group.c_str(), nullptr, 16);
+            if (val > 0xFFFF) return false;
+            groups.push_back(static_cast<uint16_t>(val));
+        }
+        return true;
+    };
+
+    std::vector<uint16_t> left_groups, right_groups;
+    if (!parse_groups(left_part, left_groups)) return false;
+    if (dcolon != std::string::npos && !parse_groups(right_part, right_groups)) return false;
+
+    size_t total = left_groups.size() + right_groups.size();
+    if (dcolon == std::string::npos && total != 8) return false;
+    if (dcolon != std::string::npos && total > 7) return false;
+
+    for (size_t i = 0; i < left_groups.size(); i++) {
+        out[i * 2] = static_cast<uint8_t>(left_groups[i] >> 8);
+        out[i * 2 + 1] = static_cast<uint8_t>(left_groups[i] & 0xFF);
+    }
+    for (size_t i = 0; i < right_groups.size(); i++) {
+        size_t pos = 8 - right_groups.size() + i;
+        out[pos * 2] = static_cast<uint8_t>(right_groups[i] >> 8);
+        out[pos * 2 + 1] = static_cast<uint8_t>(right_groups[i] & 0xFF);
+    }
+    return true;
+}
+
 void IPFilterNode::precompute_ip_bytes() {
     auto convert = [](const std::set<std::string>& ips, std::vector<IPBytes>& out) {
         for (auto& ip : ips) {
             IPBytes ib;
             std::memset(&ib, 0, sizeof(ib));
-            if (parse_ipv4_to_bytes(ip, ib.bytes)) {
+            if (ip.find(':') != std::string::npos) {
+                if (parse_ipv6_to_bytes(ip, ib.bytes)) {
+                    ib.len = 16;
+                    out.push_back(ib);
+                }
+            } else if (parse_ipv4_to_bytes(ip, ib.bytes)) {
                 ib.len = 4;
                 out.push_back(ib);
             }
-            // TODO: IPv6 address parsing if needed
         }
     };
     convert(src_ips, src_ip_bytes);
