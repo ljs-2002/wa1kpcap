@@ -485,6 +485,7 @@ class Wa1kPcap:
             if info.has_tls:
                 ct = info.tls
                 sni_val = ct.sni
+                certs = list(ct.certificates) if ct.certificates else []
                 py_flow.layers['tls_record'] = TLSInfo(
                     version=ct.version if ct.version else None,
                     content_type=ct.content_type if ct.content_type >= 0 else None,
@@ -496,6 +497,9 @@ class Wa1kPcap:
                     alpn=list(ct.alpn) if ct.alpn else [],
                     signature_algorithms=list(ct.signature_algorithms) if ct.signature_algorithms else [],
                     supported_groups=list(ct.supported_groups) if ct.supported_groups else [],
+                    certificates=certs,
+                    certificate=certs[0] if certs else None,
+                    _handshake_types=list(ct.handshake_types) if ct.handshake_types else [],
                 )
             if info.has_dns:
                 cd = info.dns

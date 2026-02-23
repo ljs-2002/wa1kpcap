@@ -45,6 +45,7 @@ struct ClassCache {
     py::object empty_bytes;
     py::object none;
     py::object true_;
+    py::object false_;
     py::object neg1;
     py::object zero;
     bool ready = false;
@@ -59,6 +60,7 @@ struct ClassCache {
         empty_bytes = py::bytes("", 0);
         none = py::none();
         true_ = py::bool_(true);
+        false_ = py::bool_(false);
         neg1 = py::int_(-1);
         zero = py::int_(0);
         ready = true;
@@ -324,7 +326,9 @@ static py::object build_dataclass_from_struct(
         timestamp, raw_data_py, (int)link_type, caplen, wirelen,
         pkt.ip_len, pkt.trans_len, pkt.app_len,
         eth, ip, ip6, tcp, udp, icmp, tls, cc.none, dns,
-        cc.true_, cc.neg1, cc.neg1,
+        pkt.is_client_to_server ? cc.true_ : cc.false_,
+        pkt.packet_index >= 0 ? py::cast(pkt.packet_index) : cc.neg1,
+        cc.neg1,
         cc.none, cc.none, cc.none, cc.none,
         raw_payload, flow_key_cache, extra_layers_py,
         arp, icmp6,
@@ -584,7 +588,20 @@ PYBIND11_MODULE(_wa1kpcap_native, m) {
         .def_readwrite("signature_algorithms", &NativeTLSInfo::signature_algorithms)
         .def_readwrite("supported_groups", &NativeTLSInfo::supported_groups)
         .def_readwrite("handshake_types", &NativeTLSInfo::handshake_types)
-        .def_readwrite("certificates", &NativeTLSInfo::certificates);
+        .def_property("certificates",
+            [](const NativeTLSInfo& self) {
+                py::list result;
+                for (const auto& cert : self.certificates) {
+                    result.append(py::bytes(cert));
+                }
+                return result;
+            },
+            [](NativeTLSInfo& self, py::list certs) {
+                self.certificates.clear();
+                for (auto& c : certs) {
+                    self.certificates.push_back(c.cast<std::string>());
+                }
+            });
 
     py::class_<NativeDNSInfo>(m, "NativeDNSInfo")
         .def(py::init<>())
