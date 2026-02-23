@@ -328,6 +328,36 @@ for flow in flows:
         print(f"User-Agent: {flow.http.user_agent}")
 ```
 
+### QUIC
+
+QUIC Initial 数据包通过零依赖内嵌加密实现（SHA-256、HKDF、AES-128-GCM）解密，提取 TLS ClientHello。SNI、ALPN 和密码套件在流级别可用。Short Header（1-RTT）数据包通过流状态 DCID 跟踪进行识别。
+
+当 ClientHello 跨越多个 Initial 数据包时，会自动执行跨包 CRYPTO 帧重组。
+
+```python
+for flow in flows:
+    if flow.quic:
+        print(f"版本: {flow.quic.version_str}")           # 例如 "QUICv1"
+        print(f"SNI: {flow.quic.sni}")                     # 服务器名称指示
+        print(f"ALPN: {flow.quic.alpn}")                   # 例如 ["h3"]
+        print(f"密码套件: {flow.quic.cipher_suites}")
+        print(f"DCID: {flow.quic.dcid.hex()}")
+        print(f"SCID: {flow.quic.scid.hex()}")
+```
+
+### 协议栈
+
+每个流都有一个 `ext_protocol` 列表，显示从 IP 层向上检测到的协议栈。具有 HTTP 相关 ALPN 值的 TLS 流会自动包含 "HTTPS"。
+
+```python
+for flow in flows:
+    print(f"协议栈: {flow.ext_protocol}")
+    # 示例:
+    # ["IPv4", "TCP", "TLS", "HTTPS"]
+    # ["IPv6", "UDP", "DNS"]
+    # ["IPv4", "UDP", "QUIC"]
+```
+
 ## 数据导出
 
 ### DataFrame
@@ -430,7 +460,10 @@ flow.pkt_down_mean / pkt_down_std / pkt_down_min / pkt_down_max / pkt_down_sum /
 flow.stats
 
 # 协议信息
-flow.tls / flow.dns / flow.http
+flow.tls / flow.dns / flow.http / flow.quic
+
+# 协议栈
+flow.ext_protocol                # 例如 ["IPv4", "TCP", "TLS", "HTTPS"]
 ```
 
 ## 支持的 DLT 类型
@@ -486,7 +519,9 @@ src/cpp/                         # C++ 原生引擎
 ├── bpf_filter.cpp/h             # BPF 过滤器编译器
 ├── expression_eval.cpp/h        # YAML 条件表达式求值器
 ├── flow_buffer.cpp/h            # TCP 流重组缓冲区
+├── flow_manager.cpp/h           # C++ 流管理器（五元组分组、TCP 状态、特征累积）
 ├── parsed_packet.h              # NativeParsedPacket 结构体定义
+├── stats_core.h                 # 统计计算（单遍、批量）
 ├── field_value.h                # FieldValue 变体类型
 ├── protocol_registry.h          # 协议注册表定义
 └── util.h                       # 工具函数

@@ -328,6 +328,36 @@ for flow in flows:
         print(f"User-Agent: {flow.http.user_agent}")
 ```
 
+### QUIC
+
+QUIC Initial packets are decrypted using a zero-dependency embedded crypto implementation (SHA-256, HKDF, AES-128-GCM) to extract the TLS ClientHello. SNI, ALPN, and cipher suites are available at the flow level. Short Header (1-RTT) packets are identified via flow-state DCID tracking.
+
+Cross-packet CRYPTO frame reassembly is performed automatically when the ClientHello spans multiple Initial packets.
+
+```python
+for flow in flows:
+    if flow.quic:
+        print(f"Version: {flow.quic.version_str}")       # e.g. "QUICv1"
+        print(f"SNI: {flow.quic.sni}")                    # Server Name Indication
+        print(f"ALPN: {flow.quic.alpn}")                  # e.g. ["h3"]
+        print(f"Cipher suites: {flow.quic.cipher_suites}")
+        print(f"DCID: {flow.quic.dcid.hex()}")
+        print(f"SCID: {flow.quic.scid.hex()}")
+```
+
+### Protocol Stack
+
+Each flow has an `ext_protocol` list showing the detected protocol stack from the IP layer upwards. TLS flows with HTTP-related ALPN values automatically include "HTTPS".
+
+```python
+for flow in flows:
+    print(f"Protocol stack: {flow.ext_protocol}")
+    # Examples:
+    # ["IPv4", "TCP", "TLS", "HTTPS"]
+    # ["IPv6", "UDP", "DNS"]
+    # ["IPv4", "UDP", "QUIC"]
+```
+
 ## Export
 
 ### DataFrame
@@ -430,7 +460,10 @@ flow.pkt_down_mean / pkt_down_std / pkt_down_min / pkt_down_max / pkt_down_sum /
 flow.stats
 
 # Protocol info
-flow.tls / flow.dns / flow.http
+flow.tls / flow.dns / flow.http / flow.quic
+
+# Protocol stack
+flow.ext_protocol                # e.g. ["IPv4", "TCP", "TLS", "HTTPS"]
 ```
 
 ## Supported DLT Types
@@ -486,7 +519,9 @@ src/cpp/                         # C++ native engine
 ├── bpf_filter.cpp/h             # BPF filter compiler
 ├── expression_eval.cpp/h        # Expression evaluator for YAML conditions
 ├── flow_buffer.cpp/h            # TCP stream reassembly buffer
+├── flow_manager.cpp/h           # C++ flow manager (5-tuple grouping, TCP state, features)
 ├── parsed_packet.h              # NativeParsedPacket struct definitions
+├── stats_core.h                 # Statistical computation (single-pass, batch)
 ├── field_value.h                # FieldValue variant type
 ├── protocol_registry.h          # Protocol registry definitions
 └── util.h                       # Utility functions

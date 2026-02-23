@@ -1,9 +1,10 @@
 # wa1kpcap
 
-[![PyPI](https://img.shields.io/pypi/v/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
-[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
-[![License](https://img.shields.io/pypi/l/wa1kpcap)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/wa1kpcap?cacheSeconds=60)](https://pypi.org/project/wa1kpcap/)
+[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap?cacheSeconds=60)](https://pypi.org/project/wa1kpcap/)
+[![License](https://img.shields.io/pypi/l/wa1kpcap?cacheSeconds=60)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
 [![Tests](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml/badge.svg)](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/github/ljs-2002/wa1kpcap/graph/badge.svg?token=WQF6D61HD2)](https://codecov.io/github/ljs-2002/wa1kpcap)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://pypi.org/project/wa1kpcap/)
 
 [中文文档](https://github.com/ljs-2002/wa1kpcap/blob/main/README_CN.md)
@@ -57,7 +58,7 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 - Statistical aggregation: mean, std, var, min, max, range, median, skew, kurt, cv, plus up/down directional breakdowns
 - Multi-layer protocol field extraction from link layer to application layer
 - BPF filter with protocol-aware keywords (dhcp, dhcpv6, vlan, gre, vxlan, mpls)
-- IP fragment, TCP stream, and TLS record reassembly
+- Cross-packet reassembly: IP fragments, TCP streams, TLS records, QUIC CRYPTO frames
 - Export to DataFrame, CSV, JSON
 - Custom incremental feature registration
 - YAML-based protocol extension for adding new protocols without C++ code
@@ -68,10 +69,13 @@ For detailed usage, API reference, and examples, see [docs/README.md](https://gi
 
 ## Roadmap
 
-- More application protocols (QUIC 0-RTT/Handshake decryption, HTTP/3, SSH, SMTP)
+- More protocol support (QUIC 0-RTT/Handshake, HTTP/3, SSH, SMTP, SIP, etc.)
 - CLI tool for quick pcap inspection
 - Multi-process parallel parsing for large captures
-- Flow-level QUIC connection tracking and migration detection
+
+## Test Coverage
+
+![Coverage](https://codecov.io/github/ljs-2002/wa1kpcap/graphs/tree.svg?token=WQF6D61HD2)
 
 ## License
 

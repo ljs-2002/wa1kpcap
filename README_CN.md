@@ -1,9 +1,10 @@
 # wa1kpcap
 
-[![PyPI](https://img.shields.io/pypi/v/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
-[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap)](https://pypi.org/project/wa1kpcap/)
-[![License](https://img.shields.io/pypi/l/wa1kpcap)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/wa1kpcap?cacheSeconds=60)](https://pypi.org/project/wa1kpcap/)
+[![Python](https://img.shields.io/pypi/pyversions/wa1kpcap?cacheSeconds=60)](https://pypi.org/project/wa1kpcap/)
+[![License](https://img.shields.io/pypi/l/wa1kpcap?cacheSeconds=60)](https://github.com/ljs-2002/wa1kpcap/blob/main/LICENSE)
 [![Tests](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml/badge.svg)](https://github.com/ljs-2002/wa1kpcap/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/github/ljs-2002/wa1kpcap/graph/badge.svg?token=WQF6D61HD2)](https://codecov.io/github/ljs-2002/wa1kpcap)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://pypi.org/project/wa1kpcap/)
 
 [English](https://github.com/ljs-2002/wa1kpcap/blob/main/README.md)
@@ -57,7 +58,7 @@ for flow in flows:
 - 统计聚合：mean、std、var、min、max、range、median、skew、kurt、cv，以及上行/下行方向性统计
 - 从链路层到应用层的多层协议字段提取
 - BPF 过滤器，支持协议关键字（dhcp、dhcpv6、vlan、gre、vxlan、mpls）
-- IP 分片、TCP 流、TLS 记录重组
+- 跨包重组：IP 分片、TCP 流、TLS 记录、QUIC CRYPTO 帧
 - 导出为 DataFrame、CSV、JSON
 - 自定义增量特征注册
 - 基于 YAML 的协议扩展，无需编写 C++ 代码即可添加新协议
@@ -68,10 +69,13 @@ for flow in flows:
 
 ## 路线图
 
-- 更多应用层协议（QUIC 0-RTT/Handshake 解密、HTTP/3、SSH、SMTP）
+- 更多协议支持（QUIC 0-RTT/Handshake、HTTP/3、SSH、SMTP、SIP 等）
 - CLI 命令行工具，快速检查 pcap 文件
 - 多进程并行解析，处理大规模抓包文件
-- 流级 QUIC 连接跟踪与迁移检测
+
+## 测试覆盖率
+
+![Coverage](https://codecov.io/github/ljs-2002/wa1kpcap/graphs/tree.svg?token=WQF6D61HD2)
 
 ## 许可证
 
