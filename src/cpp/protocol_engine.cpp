@@ -191,6 +191,9 @@ ProtocolEngine::ProtocolEngine(const YamlLoader& loader)
     fast_dispatch_["dhcpv6"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
         return fast_parse_dhcpv6(buf, len, pkt);
     };
+    fast_dispatch_["dns"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
+        return fast_parse_dns(buf, len, pkt);
+    };
     fast_dispatch_["quic"] = [this](const uint8_t* buf, size_t len, size_t, NativeParsedPacket& pkt) {
         return fast_parse_quic(buf, len, pkt);
     };
@@ -2058,6 +2061,98 @@ static const char* quic_long_packet_type_str(int type) {
         case 3: return "Retry";
         default: return "unknown";
     }
+}
+
+// ── DNS fast parser ──────────────────────────────────────────────────────────
+
+// Decode a DNS compressed name starting at buf[offset].
+// pkt_base/pkt_len is the full DNS message (for pointer resolution).
+// Returns the decoded domain name and the number of bytes consumed from buf[offset].
+// Returns {"", 0} on error.
+static std::pair<std::string, size_t> dns_decode_name(
+    const uint8_t* pkt_base, size_t pkt_len, size_t offset)
+{
+    std::string name;
+    size_t consumed = 0;       // bytes consumed at the original offset
+    bool jumped = false;
+    size_t cur = offset;
+    int max_jumps = 64;        // prevent infinite loops
+
+    while (cur < pkt_len && max_jumps-- > 0) {
+        uint8_t label_len = pkt_base[cur];
+
+        if (label_len == 0) {
+            // End of name
+            if (!jumped) consumed = cur - offset + 1;
+            break;
+        }
+
+        if ((label_len & 0xC0) == 0xC0) {
+            // Pointer: 2 bytes
+            if (cur + 1 >= pkt_len) return {"", 0};
+            if (!jumped) consumed = cur - offset + 2;
+            uint16_t ptr = ((label_len & 0x3F) << 8) | pkt_base[cur + 1];
+            if (ptr >= pkt_len) return {"", 0};
+            cur = ptr;
+            jumped = true;
+            continue;
+        }
+
+        if ((label_len & 0xC0) != 0) {
+            // Reserved label type
+            return {"", 0};
+        }
+
+        // Normal label
+        cur++;
+        if (cur + label_len > pkt_len) return {"", 0};
+        if (!name.empty()) name += '.';
+        name.append(reinterpret_cast<const char*>(pkt_base + cur), label_len);
+        cur += label_len;
+        if (!jumped) consumed = cur - offset;
+    }
+
+    if (max_jumps <= 0) return {"", 0};
+    if (consumed == 0 && !jumped) return {"", 0};
+    return {name, consumed};
+}
+
+ProtocolEngine::FastResult ProtocolEngine::fast_parse_dns(
+    const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const
+{
+    // DNS header: 12 bytes minimum
+    if (len < 12) return {};
+
+    pkt.has_dns = true;
+    auto& dns = pkt.dns;
+
+    // Parse header
+    dns.flags = (buf[2] << 8) | buf[3];
+    dns.question_count = (buf[4] << 8) | buf[5];
+    dns.answer_count = (buf[6] << 8) | buf[7];
+    dns.authority_count = (buf[8] << 8) | buf[9];
+    dns.additional_count = (buf[10] << 8) | buf[11];
+    dns.response_code = dns.flags & 0x0F;
+
+    // Parse question section — extract query names
+    size_t offset = 12;
+    int qcount = static_cast<int>(dns.question_count);
+    if (qcount > 32) qcount = 32;  // sanity cap
+
+    for (int i = 0; i < qcount && offset < len; i++) {
+        auto [name, consumed] = dns_decode_name(buf, len, offset);
+        if (consumed == 0) break;
+        offset += consumed;
+        // Skip QTYPE (2) + QCLASS (2)
+        if (offset + 4 > len) break;
+        offset += 4;
+        if (!name.empty()) {
+            dns.queries.push_back(std::move(name));
+        }
+    }
+
+    // Consume entire DNS message
+    return {len, ""};
 }
 
 ProtocolEngine::FastResult ProtocolEngine::fast_parse_quic(

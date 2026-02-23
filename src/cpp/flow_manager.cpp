@@ -142,6 +142,14 @@ AggregatedFlowInfo NativeFlow::aggregate() const {
                 if (t.alpn.empty() && !s.alpn.empty()) t.alpn = s.alpn;
                 if (t.signature_algorithms.empty() && !s.signature_algorithms.empty()) t.signature_algorithms = s.signature_algorithms;
                 if (t.supported_groups.empty() && !s.supported_groups.empty()) t.supported_groups = s.supported_groups;
+                // Accumulate handshake_types from all packets
+                for (auto ht : s.handshake_types) {
+                    t.handshake_types.push_back(ht);
+                }
+                // Certificates: accumulate from all packets (rare in per-packet path)
+                for (const auto& cert : s.certificates) {
+                    t.certificates.push_back(cert);
+                }
             }
         }
 
@@ -153,8 +161,19 @@ AggregatedFlowInfo NativeFlow::aggregate() const {
             } else {
                 auto& d = info.dns;
                 const auto& s = pkt.dns;
-                if (d.queries.empty() && !s.queries.empty()) d.queries = s.queries;
+                // Accumulate unique query names from all packets
+                for (const auto& q : s.queries) {
+                    bool found = false;
+                    for (const auto& existing : d.queries) {
+                        if (existing == q) { found = true; break; }
+                    }
+                    if (!found) d.queries.push_back(q);
+                }
                 if (d.response_code == 0 && s.response_code != 0) d.response_code = s.response_code;
+                // Merge counts from response packets (query has 0 answers)
+                if (d.answer_count == 0 && s.answer_count != 0) d.answer_count = s.answer_count;
+                if (d.authority_count == 0 && s.authority_count != 0) d.authority_count = s.authority_count;
+                if (d.additional_count == 0 && s.additional_count != 0) d.additional_count = s.additional_count;
             }
         }
 
@@ -163,13 +182,20 @@ AggregatedFlowInfo NativeFlow::aggregate() const {
             if (!info.has_quic) {
                 info.quic = pkt.quic;
                 info.has_quic = true;
+                // SCID should only come from S2C (server) packets.
+                // If first packet is C2S, clear SCID so it gets filled from server later.
+                if (pkt.is_client_to_server) {
+                    info.quic.scid.clear();
+                    info.quic.scid_len = 0;
+                }
             } else {
                 auto& q = info.quic;
                 const auto& s = pkt.quic;
                 merge_str(q.sni, s.sni);
                 if (q.alpn.empty() && !s.alpn.empty()) q.alpn = s.alpn;
                 if (q.cipher_suites.empty() && !s.cipher_suites.empty()) q.cipher_suites = s.cipher_suites;
-                if (q.scid.empty() && !s.scid.empty()) {
+                // SCID: direction-aware — take from first S2C (server) packet
+                if (q.scid.empty() && !s.scid.empty() && !pkt.is_client_to_server) {
                     q.scid = s.scid;
                     q.scid_len = s.scid_len;
                 }

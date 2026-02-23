@@ -190,6 +190,7 @@ private:
     FastResult fast_parse_mpls(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_dhcp(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_dhcpv6(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
+    FastResult fast_parse_dns(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
     FastResult fast_parse_quic(const uint8_t* buf, size_t len, NativeParsedPacket& pkt) const;
 
     // Merge a single TLS parse result into pkt.tls (first-wins for most fields, accumulate handshake_types)
