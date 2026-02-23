@@ -350,6 +350,9 @@ class TestNativeICMPParsing:
         assert pkt.icmp is not None
         assert pkt.icmp.type == 8
         assert pkt.icmp.code == 0
+        # rest_data should contain id + seq + payload (everything after type/code/checksum)
+        assert pkt.icmp._raw is not None
+        assert len(pkt.icmp._raw) > 0
 
     def test_icmp_dest_unreachable(self):
         parser = _get_native_parser()

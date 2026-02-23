@@ -230,8 +230,85 @@ def test_flow_tls_state_integration():
     assert flow._tls_incomplete_data == {1: b"", -1: b""}
 
 
-if __name__ == '__main__':
-    test_tls_with_multi_pcap()
+def test_native_tls_flow_sni_content():
+    """Test that native engine TLS flows have actual SNI domain names, not just list type."""
+    pcap_path = MULTI_PCAP
+    if not os.path.exists(pcap_path):
+        pytest.skip("multi.pcap not found")
+
+    analyzer = Wa1kPcap(verbose_mode=True)
+    flows = analyzer.analyze_file(pcap_path)
+    tls_flows = [f for f in flows if f.tls and f.tls.sni]
+    assert len(tls_flows) > 0, "Should have TLS flows with SNI"
+
+    for flow in tls_flows:
+        for sni in flow.tls.sni:
+            assert isinstance(sni, str), f"SNI should be str, got {type(sni)}"
+            assert len(sni) > 0, "SNI should not be empty string"
+            assert '.' in sni, f"SNI should be a domain name, got '{sni}'"
+
+
+def test_native_tls_flow_certificates():
+    """Test that native engine extracts TLS certificates at flow level."""
+    pcap_path = MULTI_PCAP
+    if not os.path.exists(pcap_path):
+        pytest.skip("multi.pcap not found")
+
+    analyzer = Wa1kPcap(verbose_mode=True)
+    flows = analyzer.analyze_file(pcap_path)
+    cert_flows = [f for f in flows if f.tls and f.tls.certificates]
+    assert len(cert_flows) > 0, "Should have TLS flows with certificates"
+
+    for flow in cert_flows:
+        assert isinstance(flow.tls.certificates, list)
+        for cert in flow.tls.certificates:
+            assert isinstance(cert, bytes), f"Certificate should be bytes, got {type(cert)}"
+            assert len(cert) > 0, "Certificate should not be empty"
+        # certificate (singular) should be the first cert
+        assert flow.tls.certificate == flow.tls.certificates[0]
+        # Verify parse_cert_der can parse it
+        parsed = parse_cert_der(flow.tls.certificate)
+        if parsed is not None:
+            assert 'subject' in parsed
+            assert 'issuer' in parsed
+
+
+def test_native_tls_flow_cipher_suite():
+    """Test that native engine extracts ServerHello cipher_suite at flow level."""
+    pcap_path = MULTI_PCAP
+    if not os.path.exists(pcap_path):
+        pytest.skip("multi.pcap not found")
+
+    analyzer = Wa1kPcap(verbose_mode=True)
+    flows = analyzer.analyze_file(pcap_path)
+    tls_flows = [f for f in flows if f.tls and f.tls.cipher_suite is not None]
+    assert len(tls_flows) > 0, "Should have TLS flows with cipher_suite"
+
+    for flow in tls_flows:
+        assert isinstance(flow.tls.cipher_suite, int)
+        assert flow.tls.cipher_suite > 0, "cipher_suite should be positive"
+
+
+def test_native_tls_flow_handshake_types():
+    """Test that native engine populates _handshake_types at flow level."""
+    pcap_path = MULTI_PCAP
+    if not os.path.exists(pcap_path):
+        pytest.skip("multi.pcap not found")
+
+    analyzer = Wa1kPcap(verbose_mode=True)
+    flows = analyzer.analyze_file(pcap_path)
+    tls_flows = [f for f in flows if f.tls]
+    assert len(tls_flows) > 0
+
+    has_handshake_types = False
+    for flow in tls_flows:
+        if hasattr(flow.tls, '_handshake_types') and flow.tls._handshake_types:
+            has_handshake_types = True
+            for ht in flow.tls._handshake_types:
+                assert isinstance(ht, int)
+                assert 0 <= ht <= 255
+            break
+    assert has_handshake_types, "At least one TLS flow should have _handshake_types"
     test_tls_flow_state()
     test_parse_tls_basic()
     test_tls_info_properties()

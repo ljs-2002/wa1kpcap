@@ -57,6 +57,13 @@ def test_dns_query_parsing():
                 f"[{engine}] DNS query (dst_port=53) not recognized as DNS"
             )
             assert dns_pkts[0].dns.is_response is False
+            # Verify queries field contains the actual domain name
+            assert dns_pkts[0].dns.queries, (
+                f"[{engine}] DNS query 'queries' field is empty"
+            )
+            assert 'example.com' in dns_pkts[0].dns.queries[0], (
+                f"[{engine}] expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
+            )
     finally:
         os.unlink(pcap_path)
 
@@ -96,6 +103,13 @@ def test_dns_response_parsing():
             )
             assert dns_pkts[0].dns.is_response is True
             assert dns_pkts[0].dns.answer_count >= 1
+            # Verify queries field contains the domain name
+            assert dns_pkts[0].dns.queries, (
+                f"[{engine}] DNS response 'queries' field is empty"
+            )
+            assert 'example.com' in dns_pkts[0].dns.queries[0], (
+                f"[{engine}] expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
+            )
     finally:
         os.unlink(pcap_path)
 
@@ -139,6 +153,17 @@ def test_dns_bidirectional_flow():
             # First is query, second is response
             assert dns_pkts[0].dns.is_response is False
             assert dns_pkts[1].dns.is_response is True
+            # Both packets should have queries populated
+            assert dns_pkts[0].dns.queries, (
+                f"[{engine}] DNS query 'queries' field is empty in bidirectional flow"
+            )
+            assert 'example.com' in dns_pkts[0].dns.queries[0]
+            # Flow-level DNS should also have queries
+            assert flow.dns is not None, f"[{engine}] flow.dns is None"
+            assert flow.dns.queries, (
+                f"[{engine}] flow-level DNS 'queries' field is empty"
+            )
+            assert 'example.com' in flow.dns.queries[0]
     finally:
         os.unlink(pcap_path)
 

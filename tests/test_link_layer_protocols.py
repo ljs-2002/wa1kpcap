@@ -896,6 +896,8 @@ class TestDHCPParsing:
         assert pkt.dhcp is not None
         assert pkt.dhcp.op == 1
         assert pkt.dhcp.xid == 0xAABBCCDD
+        assert pkt.dhcp.htype == 1  # Ethernet
+        assert pkt.dhcp.chaddr == "de:ad:be:ef:00:01"
         # options_raw contains raw TLV bytes: tag(53) + len(1) + val(1) + end(0xff)
         assert b"\x35\x01\x01" in pkt.dhcp.options_raw
 
@@ -912,6 +914,8 @@ class TestDHCPParsing:
 
         assert pkt.dhcp is not None
         assert pkt.dhcp.op == 2
+        assert pkt.dhcp.xid == 0x11223344
+        assert pkt.dhcp.yiaddr == "192.168.1.100"
         assert len(pkt.dhcp.options_raw) > 0
 
     def test_dhcp_multiple_options(self):
@@ -962,6 +966,29 @@ class TestDHCPParsing:
         assert pkt.udp is not None
         assert pkt.udp.dport == 67
         assert pkt.dhcp is not None
+
+    def test_dhcp_all_address_fields(self):
+        """Verify all DHCP address fields (ciaddr, yiaddr, siaddr, giaddr, chaddr)."""
+        parser = _get_native_parser()
+        raw = self._build_dhcp_packet(
+            op=2, xid=0xDEADBEEF,
+            ciaddr="10.0.0.1",
+            yiaddr="10.0.0.100",
+            siaddr="10.0.0.254",
+            giaddr="10.0.0.1",
+            chaddr="11:22:33:44:55:66",
+            options=[(53, b"\x05")])  # DHCP ACK
+        pkt = parser.parse_to_dataclass(raw, DLT_EN10MB)
+
+        assert pkt.dhcp is not None
+        assert pkt.dhcp.op == 2
+        assert pkt.dhcp.xid == 0xDEADBEEF
+        assert pkt.dhcp.htype == 1
+        assert pkt.dhcp.ciaddr == "10.0.0.1"
+        assert pkt.dhcp.yiaddr == "10.0.0.100"
+        assert pkt.dhcp.siaddr == "10.0.0.254"
+        assert pkt.dhcp.giaddr == "10.0.0.1"
+        assert pkt.dhcp.chaddr == "11:22:33:44:55:66"
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -516,3 +516,47 @@ class TestQUICIntegration:
                 assert pkt.quic is not None, \
                     f"Flow {flow.key} first packet missing quic"
 
+    def test_dcid_from_client_initial(self):
+        """Flow-level DCID should come from the client's Initial packet."""
+        for flow in self.flows:
+            if flow.quic is None or not flow.quic.dcid:
+                continue
+            # First packet should be C2S Initial with matching DCID
+            pkt0 = flow.packets[0]
+            assert pkt0.is_client_to_server is True, \
+                f"Flow {flow.key}: first packet should be C2S"
+            assert pkt0.quic is not None
+            assert flow.quic.dcid == pkt0.quic.dcid, \
+                f"Flow {flow.key}: flow DCID should match first C2S Initial DCID"
+
+    def test_scid_from_server_initial(self):
+        """Flow-level SCID should come from the server's Initial packet (S2C)."""
+        for flow in self.flows:
+            if flow.quic is None or not flow.quic.scid:
+                continue
+            # Find first S2C packet with SCID
+            server_scid = None
+            for pkt in flow.packets:
+                if not pkt.is_client_to_server and pkt.quic and pkt.quic.scid:
+                    server_scid = pkt.quic.scid
+                    break
+            assert server_scid is not None, \
+                f"Flow {flow.key}: should have a S2C packet with SCID"
+            assert flow.quic.scid == server_scid, \
+                f"Flow {flow.key}: flow SCID should match first S2C Initial SCID"
+
+    def test_packet_direction_correctness(self):
+        """Verify is_client_to_server is correct based on IP addresses."""
+        for flow in self.flows:
+            if flow.quic is None:
+                continue
+            src_ip = flow.key.src_ip
+            for pkt in flow.packets[:4]:
+                if pkt.ip:
+                    if pkt.ip.src == src_ip:
+                        assert pkt.is_client_to_server is True, \
+                            f"Flow {flow.key}: pkt from {pkt.ip.src} should be C2S"
+                    else:
+                        assert pkt.is_client_to_server is False, \
+                            f"Flow {flow.key}: pkt from {pkt.ip.src} should be S2C"
+

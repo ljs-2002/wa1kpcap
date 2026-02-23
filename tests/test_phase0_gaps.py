@@ -409,3 +409,7 @@ class TestAppLayerParsing:
         pkt = parser.parse_to_dataclass(raw, DLT_EN10MB, app_layer_mode=0)
         assert pkt.udp is not None
         assert pkt.dns is not None
+        assert pkt.dns.queries, "DNS queries field should not be empty"
+        assert 'example.com' in pkt.dns.queries[0], (
+            f"expected 'example.com' in queries, got {pkt.dns.queries}"
+        )
