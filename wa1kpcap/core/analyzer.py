@@ -116,6 +116,8 @@ class Wa1kPcap:
             Logical operators: and, or, not
             Grouping: (expr)
             Examples: "tcp and port 443", "host 192.168.1.1 or port 53", "not icmp"
+        min_packets: Minimum packet count per flow. Flows with fewer packets are
+            discarded (default: 1, i.e., keep all flows)
         verbose_mode: Store packet-level information (default: False)
         enabled_features: List of feature names to extract (default: all)
         save_raw_bytes: Save raw packet bytes (memory intensive, default: False)
@@ -190,6 +192,9 @@ class Wa1kPcap:
         bpf_filter: str | None = None,
         default_filter: str | None = "not arp and not icmp and not icmpv6 and not dhcp and not dhcpv6",
 
+        # Flow filtering
+        min_packets: int = 1,
+
         # Detailed mode
         verbose_mode: bool = False,
 
@@ -230,6 +235,7 @@ class Wa1kPcap:
         self.filter_ack = filter_ack
         self.filter_rst = filter_rst
         self.filter_retrans = filter_retrans
+        self.min_packets = min_packets
         self.verbose_mode = verbose_mode
         self.enabled_features = enabled_features
         self.save_raw_bytes = save_raw_bytes
@@ -394,6 +400,10 @@ class Wa1kPcap:
                 flow._verbose = True
                 flow._save_raw = self.save_raw_bytes
             flow.features = self._feature_extractor.extract(flow)
+
+        # Min packets filter
+        if self.min_packets > 1:
+            flows = [f for f in flows if f.packet_count >= self.min_packets]
 
         self._stats['flows_created'] += len(flows)
 
@@ -612,6 +622,10 @@ class Wa1kPcap:
         # Post-parse app-layer filtering (e.g., bpf_filter="tls")
         if self._packet_filter and self._packet_filter.has_app_layer:
             flows = self._post_filter_flows(flows)
+
+        # Min packets filter
+        if self.min_packets > 1:
+            flows = [f for f in flows if f.packet_count >= self.min_packets]
 
         self._stats['flows_created'] += len(flows)
 

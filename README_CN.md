@@ -70,6 +70,7 @@ for flow in flows:
 ## 路线图
 
 - 更多协议支持（QUIC 0-RTT/Handshake、HTTP/3、SSH、SMTP、SIP 等）
+- 原始字节字段遮蔽（置零/随机/指定值），防止模型对特定字段过拟合
 - CLI 命令行工具，快速检查 pcap 文件
 - 多进程并行解析，处理大规模抓包文件
 

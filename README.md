@@ -70,6 +70,7 @@ For detailed usage, API reference, and examples, see [docs/README.md](https://gi
 ## Roadmap
 
 - More protocol support (QUIC 0-RTT/Handshake, HTTP/3, SSH, SMTP, SIP, etc.)
+- Field masking in raw bytes (zero/random/fixed value) to prevent model overfitting on specific fields
 - CLI tool for quick pcap inspection
 - Multi-process parallel parsing for large captures
 

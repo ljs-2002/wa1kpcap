@@ -312,6 +312,51 @@ def test_analyzer_works_without_dpkt():
         app._HAS_DPKT = original_has_dpkt
 
 
+def test_min_packets_default():
+    """Test that min_packets=1 (default) keeps all flows."""
+    pcap_path = create_test_pcap()
+    try:
+        analyzer = Wa1kPcap(default_filter=None, min_packets=1)
+        flows = analyzer.analyze_file(pcap_path)
+        # Should have 2 flows: TCP (4 pkts) + UDP (1 pkt)
+        assert len(flows) == 2
+    finally:
+        os.unlink(pcap_path)
+
+
+def test_min_packets_filters_small_flows():
+    """Test that min_packets filters flows with fewer packets."""
+    pcap_path = create_test_pcap()
+    try:
+        analyzer = Wa1kPcap(default_filter=None, min_packets=2)
+        flows = analyzer.analyze_file(pcap_path)
+        # UDP flow has 1 packet → filtered out, only TCP flow remains
+        assert len(flows) == 1
+        assert flows[0].packet_count >= 2
+    finally:
+        os.unlink(pcap_path)
+
+
+def test_min_packets_filters_all():
+    """Test that a high min_packets value filters all flows."""
+    pcap_path = create_test_pcap()
+    try:
+        analyzer = Wa1kPcap(default_filter=None, min_packets=100)
+        flows = analyzer.analyze_file(pcap_path)
+        assert len(flows) == 0
+    finally:
+        os.unlink(pcap_path)
+
+
+def test_min_packets_attribute():
+    """Test that min_packets is stored as attribute."""
+    analyzer = Wa1kPcap(min_packets=5)
+    assert analyzer.min_packets == 5
+
+    analyzer2 = Wa1kPcap()
+    assert analyzer2.min_packets == 1
+
+
 if __name__ == '__main__':
     test_analyzer_initialization()
     test_analyzer_stats()
@@ -323,4 +368,8 @@ if __name__ == '__main__':
     test_analyzer_nonexistent_file()
     test_analyzer_empty_directory()
     test_analyzer_register_feature()
+    test_min_packets_default()
+    test_min_packets_filters_small_flows()
+    test_min_packets_filters_all()
+    test_min_packets_attribute()
     print("test_analyzer PASSED")
