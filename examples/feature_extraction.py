@@ -122,9 +122,11 @@ for i, flow in enumerate(flows[:5]):
         if flow.tls.alpn:
             print(f"  ALPN: {flow.tls.alpn}")
         if flow.tls.certificate:
-            cert = flow.tls.certificate
-            print(f"  Cert subject: {cert.get('subject') if isinstance(cert, dict) else cert.subject}")
-            print(f"  Cert issuer: {cert.get('issuer') if isinstance(cert, dict) else cert.issuer}")
+            from wa1kpcap.protocols.application import parse_cert_der
+            parsed = parse_cert_der(flow.tls.certificate)
+            if parsed:
+                print(f"  Cert subject: {parsed.get('subject')}")
+                print(f"  Cert issuer: {parsed.get('issuer')}")
         print()
 
     # HTTP

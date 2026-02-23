@@ -1272,8 +1272,11 @@ class ParsedPacket:
             if self.tls.sni:
                 result['tls']['sni'] = self.tls.sni
             if self.tls.certificate:
-                result['tls']['cert_subject'] = self.tls.certificate.subject
-                result['tls']['cert_issuer'] = self.tls.certificate.issuer
+                from wa1kpcap.protocols.application import parse_cert_der
+                parsed = parse_cert_der(self.tls.certificate)
+                if parsed:
+                    result['tls']['cert_subject'] = parsed.get('subject')
+                    result['tls']['cert_issuer'] = parsed.get('issuer')
         if self.http:
             result['http'] = {
                 'method': self.http.method,
