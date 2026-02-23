@@ -36,7 +36,7 @@ from wa1kpcap.exporters import (
     FlowExporter
 )
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __author__ = "1in_js"
 
 __all__ = [

@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.4 (2026-02-23)
+
+### New Features
+
+- C++ flow management pipeline: fused read, parse, filter, and flow management in C++ (`process_file`), eliminating per-packet Python-C++ boundary crossing
+- C++ protocol aggregation: TLS/DNS/QUIC first-wins merge, TLS stream reassembly, and QUIC CRYPTO reassembly all in C++ (`aggregate_full`)
+- C++ feature computation: statistical features (packet lengths, IATs, TCP flags, windows) computed entirely in C++ (`compute_features`)
+- DNS fast-path C++ parser with compressed name decompression
+- LazyPacketList: deferred C++ to Python packet conversion, only materializes on access
+- Codecov integration for test coverage tracking
+
+### Bug Fixes
+
+- Fix packet direction detection: `is_client_to_server` was hardcoded to True in pybind11 bindings
+- Fix QUIC SCID aggregation: now direction-aware, SCID taken from server (S2C) packets only
+- Fix TLS flow-level conversion: certificates, handshake_types now properly propagated
+- Fix TLS certificate access: use `parse_cert_der` for DER bytes instead of treating as object
+- Fix IPv6 address support in BPF filter tokenizer (both Python and C++)
+
+### Improvements
+
+- Batch pybind11 calls: `aggregate_all`, `compute_all_features_dicts`, `export_all_flow_data` minimize boundary crossings
+- dpkt engine marked as deprecated with DeprecationWarning
+
+### Tests
+
+- Protocol field verification against tshark (zero mismatches on multi.pcap and quic2.pcap)
+- New test suites: test_flow_manager_native.py, test_process_file.py
+- Expanded coverage: TLS certificates/SNI/cipher_suite, QUIC direction/SCID, DNS queries, DHCP fields, ICMP rest_data
+
 ## v0.1.3 (2026-02-22)
 
 ### Bug Fixes
