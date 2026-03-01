@@ -196,7 +196,6 @@ class IPFragmentReassembler:
         is_last = not ip.more_fragments
 
         # Get payload (data after IP header)
-        import dpkt
         ip_header_len = (ip._hdr_len if hasattr(ip, '_hdr_len') else 20)
         payload = pkt.raw_data[ip_header_len:]
 

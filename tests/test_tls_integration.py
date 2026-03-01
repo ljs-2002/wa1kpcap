@@ -1,17 +1,13 @@
-"""Test TLS integration with multi.pcap and scapy-generated packets."""
+"""Test TLS integration with multi.pcap."""
 
 import pytest
-import sys
 import os
 
 from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap
-from wa1kpcap.protocols.application import TLSFlowState, parse_tls, parse_cert_der, get_extension_name
-from wa1kpcap.core.flow import Flow, FlowKey
-from wa1kpcap.core.packet import ParsedPacket, TLSInfo
+from wa1kpcap.core.packet import TLSInfo
 
 
-# Test with real pcap file (multi.pcap contains TLS flows)
 def test_tls_with_multi_pcap():
     """Test TLS parsing with real multi.pcap file."""
     pcap_path = MULTI_PCAP
@@ -39,11 +35,6 @@ def test_tls_with_multi_pcap():
         assert flow.tls.certificate is not None
         assert isinstance(flow.tls.certificate, bytes)
         assert len(flow.tls.certificate) > 0
-        # Verify parse_cert_der can parse it
-        parsed = parse_cert_der(flow.tls.certificate)
-        assert parsed is not None
-        assert 'subject' in parsed
-        assert 'issuer' in parsed
 
         # Verify exts dictionary
         assert isinstance(flow.tls.exts, dict)
@@ -61,40 +52,6 @@ def test_tls_with_multi_pcap():
         assert isinstance(flow.tls.alpn, list)
         assert isinstance(flow.tls.signature_algorithms, list)
         assert isinstance(flow.tls.supported_groups, list)
-
-
-def test_tls_flow_state():
-    """Test TLSFlowState class."""
-    state = TLSFlowState()
-
-    # Test initial values
-    assert state.version is not None
-    assert state.sni == []
-    assert state.alpn == []
-    assert state.signature_algorithms == []
-    assert state.supported_groups == []
-    assert state.certs == []
-    assert state.exts == {}
-
-
-def test_parse_tls_basic():
-    """Test parse_tls function with basic data."""
-    import dpkt.ssl
-
-    # Create a simple ClientHello
-    # This is a minimal TLS ClientHello record
-    client_hello = (
-        b'\x16'  # Content type: Handshake (22)
-        b'\x03\x01'  # Version: TLS 1.0
-        b'\x00\x00'  # Length (placeholder, will fix)
-    )
-
-    # For now just test with empty data
-    state = None
-    new_state, parsed = parse_tls(b'', state)
-
-    assert isinstance(new_state, TLSFlowState)
-    assert parsed == 0
 
 
 def test_tls_info_properties():
@@ -122,15 +79,6 @@ def test_tls_info_properties():
     assert 0 in tls_info.exts
 
 
-def test_get_extension_name():
-    """Test extension name mapping."""
-    assert get_extension_name(0) == "server_name"
-    assert get_extension_name(16) == "application_layer_protocol_negotiation"
-    assert get_extension_name(13) == "signature_algorithms"
-    assert get_extension_name(10) == "supported_groups"
-    assert get_extension_name(999) == "unknown_999"
-
-
 def test_tls_info_get_extension():
     """Test TLSInfo.get_extension method."""
     tls_info = TLSInfo()
@@ -143,17 +91,6 @@ def test_tls_info_get_extension():
     tls_info.exts = {0: [b"data1", b"data2"]}
     assert tls_info.get_extension(0) == [b"data1", b"data2"]
     assert tls_info.get_extension_first(0) == b"data1"
-
-
-def test_parse_cert_der():
-    """Test certificate DER parsing."""
-    # Test with invalid data
-    result = parse_cert_der(b"invalid cert data")
-    assert result is None
-
-    # Test with empty data
-    result = parse_cert_der(b"")
-    assert result is None
 
 
 def test_tls_content_type_names():
@@ -213,25 +150,8 @@ def test_tls_version_name():
     assert tls_info.version_name == "unknown"
 
 
-def test_flow_tls_state_integration():
-    """Test Flow with TLS state integration."""
-    key = FlowKey(
-        src_ip='192.168.1.1',
-        dst_ip='10.0.0.1',
-        src_port=1234,
-        dst_port=443,
-        protocol=6
-    )
-
-    flow = Flow(key=key, start_time=0.0)
-
-    # Verify TLS state initialization
-    assert flow._tls_state is None
-    assert flow._tls_incomplete_data == {1: b"", -1: b""}
-
-
 def test_native_tls_flow_sni_content():
-    """Test that native engine TLS flows have actual SNI domain names, not just list type."""
+    """Test that native engine TLS flows have actual SNI domain names."""
     pcap_path = MULTI_PCAP
     if not os.path.exists(pcap_path):
         pytest.skip("multi.pcap not found")
@@ -266,11 +186,6 @@ def test_native_tls_flow_certificates():
             assert len(cert) > 0, "Certificate should not be empty"
         # certificate (singular) should be the first cert
         assert flow.tls.certificate == flow.tls.certificates[0]
-        # Verify parse_cert_der can parse it
-        parsed = parse_cert_der(flow.tls.certificate)
-        if parsed is not None:
-            assert 'subject' in parsed
-            assert 'issuer' in parsed
 
 
 def test_native_tls_flow_cipher_suite():
@@ -309,14 +224,3 @@ def test_native_tls_flow_handshake_types():
                 assert 0 <= ht <= 255
             break
     assert has_handshake_types, "At least one TLS flow should have _handshake_types"
-    test_tls_flow_state()
-    test_parse_tls_basic()
-    test_tls_info_properties()
-    test_get_extension_name()
-    test_tls_info_get_extension()
-    test_parse_cert_der()
-    test_tls_content_type_names()
-    test_tls_handshake_type_names()
-    test_tls_version_name()
-    test_flow_tls_state_integration()
-    print("test_tls_integration PASSED")

@@ -8,7 +8,6 @@ import tempfile
 from conftest import MULTI_PCAP
 from wa1kpcap import Wa1kPcap
 from wa1kpcap.features.registry import FeatureRegistry, FeatureType
-from wa1kpcap.protocols.base import BaseProtocolHandler, Layer
 from wa1kpcap.core.flow import Flow, FlowKey
 from wa1kpcap.features import FlowFeatures
 import numpy as np
@@ -116,27 +115,6 @@ def test_feature_registry_edge_cases():
 
     # Test unregister non-existent
     assert registry.unregister('nonexistent') is False
-
-
-def test_custom_protocol_handler():
-    """Test custom protocol handler registration."""
-    from wa1kpcap.protocols.registry import register_protocol, get_global_registry
-
-    # Get registry and ensure clean state
-    registry = get_global_registry()
-    registry.unregister('test_custom_proto')
-
-    @register_protocol('test_custom_proto', Layer.APPLICATION, encapsulates='tcp', default_ports=[9999])
-    class CustomProtocolHandler(BaseProtocolHandler):
-        def parse(self, payload, context, is_client_to_server):
-            from wa1kpcap.protocols.base import ParseResult
-            return ParseResult(success=True, data=payload[10:] if len(payload) > 10 else b'')
-
-    # Check it was registered
-    assert CustomProtocolHandler.name == 'test_custom_proto'
-
-    # Clean up
-    registry.unregister('test_custom_proto')
 
 
 def test_flow_to_dict():

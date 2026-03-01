@@ -364,12 +364,6 @@ class Flow:
     _custom_features: dict = field(default_factory=dict)  # Store feature values by name
     _feature_initialized: bool = False  # Whether features have been initialized
 
-    # TLS incomplete data buffers for reassembly (one per direction)
-    # 1 = forward (C2S), -1 = reverse (S2C)
-    _tls_incomplete_data: dict = field(default_factory=lambda: {1: b"", -1: b""})
-    # TLS flow state - stores parsed TLS handshake data
-    _tls_state: object = None  # TLSFlowState from application.py
-
     def __post_init__(self):
         if self.start_time == 0.0:
             self.start_time = time.time()
@@ -407,8 +401,6 @@ class Flow:
         obj._seq_tcp_windows = None
         obj._custom_features = {}
         obj._feature_initialized = False
-        obj._tls_incomplete_data = None
-        obj._tls_state = None
         obj._reassembled_tls = None
         return obj
 
@@ -1262,7 +1254,7 @@ class FlowManager:
         if cache is not None:
             return cache  # already (canonical, src_ip, dst_ip, src_port, dst_port, protocol, vlan_id)
 
-        # Fallback: original Python path (dpkt engine)
+        # Fallback: Python path for packets without pre-computed flow key
         ip = pkt.ip
         ip6 = pkt.ip6
 

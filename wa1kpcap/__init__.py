@@ -1,8 +1,8 @@
 """
-wa1kpcap - Dual-engine PCAP analysis library.
+wa1kpcap - Efficient PCAP analysis library.
 
-Flow-level feature extraction and protocol field parsing using a native
-C++ engine (default) or dpkt as fallback.
+Flow-level feature extraction and protocol field parsing powered by a native
+C++ engine for high performance.
 
 Example::
 
@@ -19,8 +19,6 @@ from wa1kpcap.core.flow import Flow, FlowKey, FlowManager, TCPState
 from wa1kpcap.core.packet import ParsedPacket, Layer, ProtocolInfo, ProtocolRegistry
 from wa1kpcap.core.reader import PcapReader
 from wa1kpcap.core.filter import PacketFilter, compile_filter, BPFCompiler
-from wa1kpcap.protocols.base import BaseProtocolHandler, ProtocolContext, ParseResult
-from wa1kpcap.protocols.registry import register_protocol, get_global_registry
 from wa1kpcap.features.registry import (
     register_feature,
     FeatureType,
@@ -36,7 +34,7 @@ from wa1kpcap.exporters import (
     FlowExporter
 )
 
-__version__ = "0.1.4"
+__version__ = "0.2.0"
 __author__ = "1in_js"
 
 __all__ = [
@@ -58,13 +56,6 @@ __all__ = [
     'PacketFilter',
     'compile_filter',
     'BPFCompiler',
-
-    # Protocol handlers
-    'BaseProtocolHandler',
-    'ProtocolContext',
-    'ParseResult',
-    'register_protocol',
-    'get_global_registry',
 
     # Feature extraction
     'FeatureExtractor',

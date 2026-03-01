@@ -126,7 +126,6 @@ def test_analyzer_initialization():
     # Verify components
     assert analyzer._flow_manager is not None
     assert analyzer._feature_extractor is not None
-    assert analyzer._protocol_registry is not None
 
     # Test stats
     assert analyzer._stats['files_processed'] == 0
@@ -233,15 +232,6 @@ def test_analyzer_filter_options():
     assert analyzer.filter_rst == True
 
 
-def test_analyzer_reassembly_disabled():
-    """Test analyzer with reassembly disabled."""
-    analyzer = Wa1kPcap(enable_reassembly=False)
-
-    assert analyzer._ip_reassembler is None
-    assert analyzer._tcp_reassembler is None
-    assert analyzer._tls_reassembler is None
-
-
 def test_analyzer_nonexistent_file():
     """Test analyze_file with non-existent file."""
     analyzer = Wa1kPcap()
@@ -282,34 +272,6 @@ def test_analyzer_register_feature():
 
     assert "dummy" in analyzer._custom_features
     assert analyzer._custom_features["dummy"] is processor
-
-
-def test_analyzer_works_without_dpkt():
-    """Test that analyzer works when dpkt is not available (native engine only)."""
-    import wa1kpcap.protocols.application as app
-
-    # Simulate dpkt not being available
-    original_has_dpkt = app._HAS_DPKT
-    app._HAS_DPKT = False
-
-    try:
-        pcap_path = create_test_pcap()
-        try:
-            analyzer = Wa1kPcap(verbose_mode=True, compute_statistics=True)
-            flows = analyzer.analyze_file(pcap_path)
-            assert len(flows) >= 1
-            for flow in flows:
-                assert flow.src_ip is not None
-                assert flow.dst_ip is not None
-                assert flow.packet_count > 0
-        finally:
-            if os.path.exists(pcap_path):
-                try:
-                    os.unlink(pcap_path)
-                except (PermissionError, OSError):
-                    pass
-    finally:
-        app._HAS_DPKT = original_has_dpkt
 
 
 def test_min_packets_default():

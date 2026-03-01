@@ -367,13 +367,13 @@ class TestAppLayerParsing:
     def test_valid_modes(self):
         from wa1kpcap import Wa1kPcap
         for mode in ("full", "port_only", "none"):
-            analyzer = Wa1kPcap(engine="native", app_layer_parsing=mode)
+            analyzer = Wa1kPcap(app_layer_parsing=mode)
             assert analyzer.app_layer_parsing == mode
 
     def test_invalid_mode_raises(self):
         from wa1kpcap import Wa1kPcap
         with pytest.raises(ValueError, match="Invalid app_layer_parsing"):
-            Wa1kPcap(engine="native", app_layer_parsing="invalid")
+            Wa1kPcap(app_layer_parsing="invalid")
 
     def test_mode_none_skips_app_layer(self):
         """With mode='none', DNS on port 53 should not be parsed."""

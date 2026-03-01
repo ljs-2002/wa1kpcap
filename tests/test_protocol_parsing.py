@@ -46,24 +46,23 @@ def test_dns_query_parsing():
     pcap_path = create_pcap_with_packets(packets)
 
     try:
-        for engine in ('dpkt', 'native'):
-            analyzer = Wa1kPcap(verbose_mode=True, engine=engine)
-            flows = analyzer.analyze_file(pcap_path)
+        analyzer = Wa1kPcap(verbose_mode=True)
+        flows = analyzer.analyze_file(pcap_path)
 
-            assert len(flows) == 1, f"[{engine}] expected 1 flow, got {len(flows)}"
-            flow = flows[0]
-            dns_pkts = [p for p in flow.packets if p.dns]
-            assert len(dns_pkts) == 1, (
-                f"[{engine}] DNS query (dst_port=53) not recognized as DNS"
-            )
-            assert dns_pkts[0].dns.is_response is False
-            # Verify queries field contains the actual domain name
-            assert dns_pkts[0].dns.queries, (
-                f"[{engine}] DNS query 'queries' field is empty"
-            )
-            assert 'example.com' in dns_pkts[0].dns.queries[0], (
-                f"[{engine}] expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
-            )
+        assert len(flows) == 1, f"expected 1 flow, got {len(flows)}"
+        flow = flows[0]
+        dns_pkts = [p for p in flow.packets if p.dns]
+        assert len(dns_pkts) == 1, (
+            f"DNS query (dst_port=53) not recognized as DNS"
+        )
+        assert dns_pkts[0].dns.is_response is False
+        # Verify queries field contains the actual domain name
+        assert dns_pkts[0].dns.queries, (
+            f"DNS query 'queries' field is empty"
+        )
+        assert 'example.com' in dns_pkts[0].dns.queries[0], (
+            f"expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
+        )
     finally:
         os.unlink(pcap_path)
 
@@ -91,25 +90,24 @@ def test_dns_response_parsing():
     pcap_path = create_pcap_with_packets(packets)
 
     try:
-        for engine in ('dpkt', 'native'):
-            analyzer = Wa1kPcap(verbose_mode=True, engine=engine)
-            flows = analyzer.analyze_file(pcap_path)
+        analyzer = Wa1kPcap(verbose_mode=True)
+        flows = analyzer.analyze_file(pcap_path)
 
-            assert len(flows) == 1, f"[{engine}] expected 1 flow, got {len(flows)}"
-            flow = flows[0]
-            dns_pkts = [p for p in flow.packets if p.dns]
-            assert len(dns_pkts) == 1, (
-                f"[{engine}] DNS response (src_port=53) not recognized as DNS"
-            )
-            assert dns_pkts[0].dns.is_response is True
-            assert dns_pkts[0].dns.answer_count >= 1
-            # Verify queries field contains the domain name
-            assert dns_pkts[0].dns.queries, (
-                f"[{engine}] DNS response 'queries' field is empty"
-            )
-            assert 'example.com' in dns_pkts[0].dns.queries[0], (
-                f"[{engine}] expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
-            )
+        assert len(flows) == 1, f"expected 1 flow, got {len(flows)}"
+        flow = flows[0]
+        dns_pkts = [p for p in flow.packets if p.dns]
+        assert len(dns_pkts) == 1, (
+            f"DNS response (src_port=53) not recognized as DNS"
+        )
+        assert dns_pkts[0].dns.is_response is True
+        assert dns_pkts[0].dns.answer_count >= 1
+        # Verify queries field contains the domain name
+        assert dns_pkts[0].dns.queries, (
+            f"DNS response 'queries' field is empty"
+        )
+        assert 'example.com' in dns_pkts[0].dns.queries[0], (
+            f"expected 'example.com' in queries, got {dns_pkts[0].dns.queries}"
+        )
     finally:
         os.unlink(pcap_path)
 
@@ -140,85 +138,29 @@ def test_dns_bidirectional_flow():
     pcap_path = create_pcap_with_packets(packets)
 
     try:
-        for engine in ('dpkt', 'native'):
-            analyzer = Wa1kPcap(verbose_mode=True, engine=engine)
-            flows = analyzer.analyze_file(pcap_path)
+        analyzer = Wa1kPcap(verbose_mode=True)
+        flows = analyzer.analyze_file(pcap_path)
 
-            assert len(flows) == 1, f"[{engine}] expected 1 flow, got {len(flows)}"
-            flow = flows[0]
-            dns_pkts = [p for p in flow.packets if p.dns]
-            assert len(dns_pkts) == 2, (
-                f"[{engine}] expected 2 DNS packets in flow, got {len(dns_pkts)}"
-            )
-            # First is query, second is response
-            assert dns_pkts[0].dns.is_response is False
-            assert dns_pkts[1].dns.is_response is True
-            # Both packets should have queries populated
-            assert dns_pkts[0].dns.queries, (
-                f"[{engine}] DNS query 'queries' field is empty in bidirectional flow"
-            )
-            assert 'example.com' in dns_pkts[0].dns.queries[0]
-            # Flow-level DNS should also have queries
-            assert flow.dns is not None, f"[{engine}] flow.dns is None"
-            assert flow.dns.queries, (
-                f"[{engine}] flow-level DNS 'queries' field is empty"
-            )
-            assert 'example.com' in flow.dns.queries[0]
-    finally:
-        os.unlink(pcap_path)
-
-
-def test_dns_engine_parity():
-    """Test that native and dpkt engines detect the same number of DNS packets.
-
-    This ensures the native YAML-driven parser matches dpkt's behavior
-    for DNS protocol detection in both directions.
-    """
-    try:
-        from scapy.all import Ether, IP, UDP, DNS, DNSQR, DNSRR
-    except ImportError:
-        pytest.skip("scapy not installed")
-
-    packets = [
-        # Query 1
-        Ether() / IP(src='10.0.0.1', dst='8.8.8.8') /
-        UDP(sport=11111, dport=53) /
-        DNS(id=1, rd=1, qd=DNSQR(qname='a.com')),
-        # Response 1
-        Ether() / IP(src='8.8.8.8', dst='10.0.0.1') /
-        UDP(sport=53, dport=11111) /
-        DNS(id=1, qr=1, an=DNSRR(rrname='a.com', rdata='1.2.3.4')),
-        # Query 2
-        Ether() / IP(src='10.0.0.2', dst='8.8.4.4') /
-        UDP(sport=22222, dport=53) /
-        DNS(id=2, rd=1, qd=DNSQR(qname='b.com')),
-        # Response 2
-        Ether() / IP(src='8.8.4.4', dst='10.0.0.2') /
-        UDP(sport=53, dport=22222) /
-        DNS(id=2, qr=1, an=DNSRR(rrname='b.com', rdata='5.6.7.8')),
-        # Plain UDP (not DNS) — should NOT be detected as DNS
-        Ether() / IP(src='10.0.0.3', dst='10.0.0.4') /
-        UDP(sport=9999, dport=8888) / b'\x00' * 20,
-    ]
-
-    pcap_path = create_pcap_with_packets(packets)
-
-    try:
-        results = {}
-        for engine in ('dpkt', 'native'):
-            analyzer = Wa1kPcap(verbose_mode=True, engine=engine)
-            flows = analyzer.analyze_file(pcap_path)
-            dns_count = sum(
-                1 for f in flows for p in f.packets if p.dns
-            )
-            results[engine] = dns_count
-
-        assert results['dpkt'] == results['native'], (
-            f"DNS count mismatch: dpkt={results['dpkt']}, native={results['native']}"
+        assert len(flows) == 1, f"expected 1 flow, got {len(flows)}"
+        flow = flows[0]
+        dns_pkts = [p for p in flow.packets if p.dns]
+        assert len(dns_pkts) == 2, (
+            f"expected 2 DNS packets in flow, got {len(dns_pkts)}"
         )
-        assert results['native'] == 4, (
-            f"Expected 4 DNS packets, got {results['native']}"
+        # First is query, second is response
+        assert dns_pkts[0].dns.is_response is False
+        assert dns_pkts[1].dns.is_response is True
+        # Both packets should have queries populated
+        assert dns_pkts[0].dns.queries, (
+            f"DNS query 'queries' field is empty in bidirectional flow"
         )
+        assert 'example.com' in dns_pkts[0].dns.queries[0]
+        # Flow-level DNS should also have queries
+        assert flow.dns is not None, f"flow.dns is None"
+        assert flow.dns.queries, (
+            f"flow-level DNS 'queries' field is empty"
+        )
+        assert 'example.com' in flow.dns.queries[0]
     finally:
         os.unlink(pcap_path)
 

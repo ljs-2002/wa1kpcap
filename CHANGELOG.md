@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0 (2026-03-01)
+
+### Breaking Changes
+
+- **Removed dpkt engine**: The dpkt-based Python parsing engine has been completely removed. The native C++ engine is now the only engine.
+  - Removed `engine="dpkt"` parameter from `Wa1kPcap` constructor
+  - Removed `wa1kpcap[dpkt]` optional dependency
+  - Removed `wa1kpcap/protocols/` directory (all dpkt protocol handlers)
+  - Removed `from_dpkt()` methods from all protocol Info classes
+  - Removed dpkt-related test cases
+
+### Migration Guide
+
+If you were using `engine="dpkt"`:
+```python
+# Before (v0.1.x)
+analyzer = Wa1kPcap(engine="dpkt")
+
+# After (v0.2.0)
+analyzer = Wa1kPcap()  # native engine is now the default and only option
+```
+
 ## v0.1.4 (2026-02-23)
 
 ### New Features

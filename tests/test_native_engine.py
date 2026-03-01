@@ -6,7 +6,7 @@ Tests cover:
 - NativeParser (protocol parsing via YAML + 8 primitives)
 - NativeFilter (BPF filtering on parsed dicts)
 - Converter (dict → ParsedPacket)
-- Integration: Wa1kPcap(engine="native") vs Wa1kPcap(engine="dpkt")
+- Integration: Wa1kPcap()
 """
 
 from __future__ import annotations
@@ -243,59 +243,6 @@ class TestConverter:
         assert pkt.ip.offset == 0
 
 
-# ── Test: Engine parameter in Wa1kPcap ──
-
-class TestEngineParameter:
-    """Test that the engine parameter is accepted."""
-
-    def test_native_engine_default(self):
-        from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap()
-        assert analyzer._engine == "native"
-
-    def test_dpkt_engine_explicit(self):
-        from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap(engine="dpkt")
-        assert analyzer._engine == "dpkt"
-
-    def test_native_engine_raises_if_unavailable(self):
-        from wa1kpcap.native import NATIVE_AVAILABLE
-        if NATIVE_AVAILABLE:
-            pytest.skip("Native engine is available, can't test unavailability")
-
-        from wa1kpcap import Wa1kPcap
-        with pytest.raises(RuntimeError, match="Native C\\+\\+ engine not available"):
-            Wa1kPcap(engine="native")
-
-
-# ── Test: dpkt path still works (regression) ──
-
-class TestDpktRegression:
-    """Ensure the dpkt path is completely unaffected by native engine changes."""
-
-    def test_analyze_file_dpkt(self):
-        """Basic dpkt analysis should still work."""
-        pcap_file = TEST_DIR / "single.pcap"
-        if not pcap_file.exists():
-            pytest.skip("Test pcap not found")
-
-        from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap(engine="dpkt")
-        flows = analyzer.analyze_file(pcap_file)
-        assert isinstance(flows, list)
-
-    def test_analyze_with_bpf_filter_dpkt(self):
-        """BPF filter should still work with dpkt engine."""
-        pcap_file = TEST_DIR / "single.pcap"
-        if not pcap_file.exists():
-            pytest.skip("Test pcap not found")
-
-        from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap(engine="dpkt", bpf_filter="tcp or udp")
-        flows = analyzer.analyze_file(pcap_file)
-        assert isinstance(flows, list)
-
-
 # ── Test: Native engine integration (only if compiled) ──
 
 class TestNativeIntegration:
@@ -364,44 +311,10 @@ class TestNativeIntegration:
             pytest.skip("Test pcap not found")
 
         from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap(engine="native")
+        analyzer = Wa1kPcap()
         flows = analyzer.analyze_file(pcap_file)
         assert isinstance(flows, list)
         assert len(flows) > 0
-
-    def test_native_vs_dpkt_flow_count(self):
-        """Native and dpkt engines should produce the same number of flows."""
-        pcap_file = TEST_DIR / "single.pcap"
-        if not pcap_file.exists():
-            pytest.skip("Test pcap not found")
-
-        from wa1kpcap import Wa1kPcap
-
-        dpkt_flows = Wa1kPcap(engine="dpkt").analyze_file(pcap_file)
-        native_flows = Wa1kPcap(engine="native").analyze_file(pcap_file)
-
-        assert len(native_flows) == len(dpkt_flows), (
-            f"Flow count mismatch: native={len(native_flows)}, dpkt={len(dpkt_flows)}"
-        )
-
-    def test_native_vs_dpkt_five_tuples(self):
-        """Native and dpkt engines should produce the same 5-tuples."""
-        pcap_file = TEST_DIR / "single.pcap"
-        if not pcap_file.exists():
-            pytest.skip("Test pcap not found")
-
-        from wa1kpcap import Wa1kPcap
-
-        dpkt_flows = Wa1kPcap(engine="dpkt").analyze_file(pcap_file)
-        native_flows = Wa1kPcap(engine="native").analyze_file(pcap_file)
-
-        dpkt_keys = {str(f.key) for f in dpkt_flows}
-        native_keys = {str(f.key) for f in native_flows}
-
-        assert native_keys == dpkt_keys, (
-            f"5-tuple mismatch:\n  native-only: {native_keys - dpkt_keys}\n"
-            f"  dpkt-only: {dpkt_keys - native_keys}"
-        )
 
     def test_flow_buffer(self):
         """Test FlowBuffer append and available."""
@@ -423,7 +336,7 @@ class TestNativeIntegration:
             pytest.skip("Test pcap not found")
 
         from wa1kpcap import Wa1kPcap
-        analyzer = Wa1kPcap(engine="native", bpf_filter="tcp or udp")
+        analyzer = Wa1kPcap(bpf_filter="tcp or udp")
         flows = analyzer.analyze_file(pcap_file)
         assert isinstance(flows, list)
 
@@ -753,7 +666,7 @@ class TestNativeTLSParsing:
             tmp_path = f.name
 
         try:
-            analyzer = Wa1kPcap(engine="native")
+            analyzer = Wa1kPcap()
             flows = analyzer.analyze_file(tmp_path)
             assert len(flows) >= 1
 
@@ -817,7 +730,7 @@ class TestNativeTLSParsing:
             tmp_path = f.name
 
         try:
-            analyzer = Wa1kPcap(engine="native")
+            analyzer = Wa1kPcap()
             flows = analyzer.analyze_file(tmp_path)
 
             found_sni = False

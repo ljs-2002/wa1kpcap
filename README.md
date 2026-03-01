@@ -20,7 +20,6 @@ pip install wa1kpcap
 Optional dependencies:
 
 ```bash
-pip install wa1kpcap[dpkt]      # dpkt engine support
 pip install wa1kpcap[export]    # pandas DataFrame export
 pip install wa1kpcap[crypto]    # TLS certificate parsing
 pip install wa1kpcap[dev]       # development (pytest, scapy, etc.)
@@ -52,7 +51,7 @@ All protocols have C++ fast-path implementations. Tunnel protocols (GRE, VXLAN, 
 
 ## Features
 
-- Fast C++ native parsing engine with Python API, also supports dpkt as alternative engine (`pip install wa1kpcap[dpkt]`)
+- Fast C++ native parsing engine with Python API
 - Flow-level feature extraction with signed directional packet lengths
 - 8 sequence features per flow: packet_lengths, ip_lengths, trans_lengths, app_lengths, timestamps, iats, tcp_flags, tcp_window_sizes
 - Statistical aggregation: mean, std, var, min, max, range, median, skew, kurt, cv, plus up/down directional breakdowns

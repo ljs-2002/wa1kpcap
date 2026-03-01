@@ -47,7 +47,7 @@ jobs:
         run: pip install scikit-build-core pybind11 cmake ninja
 
       - name: Install package with dev dependencies
-        run: pip install -e ".[dev,dpkt]"
+        run: pip install -e ".[dev]"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ -x -q --cov=wa1kpcap --cov-report=xml

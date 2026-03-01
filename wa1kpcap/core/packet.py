@@ -10,9 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from enum import Enum
 
-if TYPE_CHECKING:
-    import dpkt
-
 
 class _ProtocolInfoBase:
     """Abstract base for all protocol info objects. No slots defined here."""
@@ -169,14 +166,6 @@ class EthernetInfo(_SlottedInfoBase):
             self.type = type
             self._raw = _raw
 
-    @classmethod
-    def from_dpkt(cls, eth: dpkt.ethernet.Ethernet) -> EthernetInfo:
-        return cls(
-            src="{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}".format(*eth.src),
-            dst="{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}".format(*eth.dst),
-            type=eth.type,
-        )
-
 
 class IPInfo(_SlottedInfoBase):
     """IPv4 layer information."""
@@ -221,21 +210,6 @@ class IPInfo(_SlottedInfoBase):
     def more_fragments(self) -> bool:
         return (self.flags & 0x1) != 0
 
-    @classmethod
-    def from_dpkt(cls, ip: dpkt.ip.IP) -> IPInfo:
-        import socket
-        return cls(
-            version=ip.v,
-            src=socket.inet_ntop(socket.AF_INET, ip.src),
-            dst=socket.inet_ntop(socket.AF_INET, ip.dst),
-            proto=ip.p,
-            ttl=ip.ttl,
-            len=ip.len,
-            id=ip.id,
-            flags=(ip._flags_offset & 0xe000) >> 13,
-            offset=ip._flags_offset & 0x1fff,
-        )
-
 
 class IP6Info(_SlottedInfoBase):
     """IPv6 layer information."""
@@ -263,19 +237,6 @@ class IP6Info(_SlottedInfoBase):
             self.flow_label = flow_label
             self.len = len
             self._raw = _raw
-
-    @classmethod
-    def from_dpkt(cls, ip6: dpkt.ip6.IP6) -> IP6Info:
-        import socket
-        return cls(
-            version=ip6.v,
-            src=socket.inet_ntop(socket.AF_INET6, ip6.src),
-            dst=socket.inet_ntop(socket.AF_INET6, ip6.dst),
-            next_header=ip6.nxt,
-            hop_limit=ip6.hlim,
-            flow_label=ip6.flow,
-            len=ip6.plen,
-        )
 
 
 class TCPInfo(_SlottedInfoBase):
@@ -329,19 +290,6 @@ class TCPInfo(_SlottedInfoBase):
     @property
     def is_handshake_ack(self) -> bool: return self.syn and self.ack
 
-    @classmethod
-    def from_dpkt(cls, tcp: dpkt.tcp.TCP) -> TCPInfo:
-        return cls(
-            sport=tcp.sport,
-            dport=tcp.dport,
-            seq=tcp.seq,
-            ack_num=tcp.ack if tcp.flags & 0x10 else 0,
-            flags=tcp.flags,
-            win=tcp.win,
-            urgent=tcp.urp,
-            options=tcp.opts,
-        )
-
 
 class UDPInfo(_SlottedInfoBase):
     """UDP datagram information."""
@@ -361,14 +309,6 @@ class UDPInfo(_SlottedInfoBase):
             self.len = len
             self._raw = _raw
 
-    @classmethod
-    def from_dpkt(cls, udp: dpkt.udp.UDP) -> UDPInfo:
-        return cls(
-            sport=udp.sport,
-            dport=udp.dport,
-            len=udp.ulen,
-        )
-
 
 class ICMPInfo(_SlottedInfoBase):
     """ICMP message information."""
@@ -385,10 +325,6 @@ class ICMPInfo(_SlottedInfoBase):
             self.type = type
             self.code = code
             self._raw = _raw
-
-    @classmethod
-    def from_dpkt(cls, icmp: dpkt.icmp.ICMP) -> ICMPInfo:
-        return cls(type=icmp.type, code=icmp.code)
 
 
 class ARPInfo(_SlottedInfoBase):
