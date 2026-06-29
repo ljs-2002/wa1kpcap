@@ -391,6 +391,8 @@ exporter.save(flows, 'output.csv')  # 根据扩展名自动检测格式
 
 ## API 参考
 
+> **原生 C++ 特征提取（CIC / 序列 / TLS / DNS 等）** 的完整 API 见 [API_EXTRACT_CN.md](API_EXTRACT_CN.md)。
+
 ### Wa1kPcap
 
 ```python
