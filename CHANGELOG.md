@@ -7,9 +7,20 @@
 - **Removed dpkt engine**: The dpkt-based Python parsing engine has been completely removed. The native C++ engine is now the only engine.
   - Removed `engine="dpkt"` parameter from `Wa1kPcap` constructor
   - Removed `wa1kpcap[dpkt]` optional dependency
-  - Removed `wa1kpcap/protocols/` directory (all dpkt protocol handlers)
+  - Removed dpkt-based protocol handlers under the old layout
   - Removed `from_dpkt()` methods from all protocol Info classes
   - Removed dpkt-related test cases
+
+### New Features
+
+- **nvers native extractors** integrated under `src/cpp/nvers/` with pybind11 module `_wa1kpcap_nvers`
+- **`wa1kpcap.extract`** — unified Python API: `extract()`, `extract_all()`, `list_features()`, 20 feature kinds
+- **`wa1kpcap.protocols`** — per-protocol helpers (`tls_features`, `dns_features`, …)
+- **L7 JSONL extractors** for HTTP, SSH, MQTT, SIP, QUIC, RDP, VNC (header-only parsers wired to libpcap pipeline)
+- **VPN / IM / Flow** extractors (WireGuard, OpenVPN, NetFlow/IPFIX/Argus, etc.)
+- **`extract_unified_seq()`** — merge YAML-engine and native seq into one JSONL with flat `sequences` fields
+- **Examples** renamed to `demo_01` … `demo_08`; docs added at `docs/API_EXTRACT_CN.md`
+- CMake: `find_package(Python3 Development)` for reliable conda/venv builds
 
 ### Migration Guide
 

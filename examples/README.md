@@ -1,67 +1,36 @@
-# wa1kpcap Examples
+# Examples
 
-This directory contains usage examples for wa1kpcap.
+演示脚本按编号排列，命名规则：`demo_<序号>_<主题>.py`。
 
-## Examples
+| 脚本 | 说明 | 依赖 |
+|------|------|------|
+| `demo_01_analyzer_basic.py` | Wa1kPcap 基础流分析 | 核心引擎 |
+| `demo_02_analyzer_features.py` | 序列/统计/YAML 协议字段 | 核心引擎 |
+| `demo_03_custom_features.py` | 注册自定义增量特征 | 核心引擎 |
+| `demo_04_export_formats.py` | 导出 CSV / JSON / DataFrame | 核心引擎 + pandas |
+| `demo_05_native_batch_extract.py` | C++ 批量提取 CIC/seq/TLS 等 | `_wa1kpcap_nvers` |
+| `demo_06_native_protocols.py` | TLS/DNS/序列协议 API | `_wa1kpcap_nvers` |
+| `demo_07_pcap_split.py` | 按五元组切分 pcap | `_wa1kpcap_nvers` |
+| `demo_08_unified_sequences.py` | wa1kpcap + native 序列合并 JSONL | 核心 + `_wa1kpcap_nvers` |
 
-### basic_usage.py
-Demonstrates basic flow access:
-```python
-flow.src_ip          # Source IP address
-flow.sport           # Source port
-flow.dst_ip          # Destination IP address
-flow.dport           # Destination port
-flow.protocol        # Protocol number (6=TCP, 17=UDP)
-flow.proto           # Protocol name ("TCP", "UDP")
-flow.start_time      # Flow start timestamp
-flow.end_time        # Flow end timestamp
-flow.packet_count    # Number of packets
-flow.byte_count      # Total bytes
-flow.duration        # Flow duration
-```
+## 运行方式
 
-Run:
+在项目根目录执行（需先 `pip install -e .`）：
+
 ```bash
-python examples/basic_usage.py
+# 核心分析（使用 test/ 下样例 pcap）
+python examples/demo_01_analyzer_basic.py
+python examples/demo_02_analyzer_features.py
+
+# 原生 C++ 特征提取（需 libpcap-dev、libssl-dev）
+python examples/demo_05_native_batch_extract.py test/multi.pcap /tmp/out
+python examples/demo_06_native_protocols.py test/multi.pcap
+python examples/demo_07_pcap_split.py test/single.pcap
+python examples/demo_08_unified_sequences.py test/single.pcap
 ```
 
-### feature_extraction.py
-Demonstrates all available features:
-- Sequence features (packet lengths, IP/transport/app lengths, timestamps, IATs, tcp_flags)
-- Statistical features (mean, std, min, max, median, skew, kurt, cv, up/down variants)
-- Bidirectional metrics (up/down packet and byte counts)
-- TCP-specific metrics (SYN/FIN/RST/ACK/PSH counts, window sizes)
-- Protocol fields (TLS, HTTP, DNS)
+## 输出目录
 
-Run:
-```bash
-python examples/feature_extraction.py
-```
+`demo_04_export_formats.py` 会在 `examples/output/` 写入 `flows.csv`、`flows.json` 等文件。
 
-### custom_feature.py
-Demonstrates custom incremental feature registration:
-- Defining `BaseIncrementalFeature` subclasses
-- Registering features with `analyzer.register_feature()`
-- Accessing results via `flow.get_features()`
-
-Run:
-```bash
-python examples/custom_feature.py
-```
-
-### export_data.py
-Demonstrates exporting flow data to different formats:
-- DataFrame (pandas)
-- CSV
-- JSON
-
-Run:
-```bash
-python examples/export_data.py
-```
-
-## Output Directory
-
-The `output/` directory will contain exported files:
-- `flows.csv` - Flow data in CSV format
-- `flows.json` - Flow data in JSON format
+原生提取 demo 默认在 pcap 同目录或指定目录下生成 `<pcap名>_cic.csv`、`<pcap名>_tls.log` 等，详见 [API 文档](../docs/API_EXTRACT_CN.md)。

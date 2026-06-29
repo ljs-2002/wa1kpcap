@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Efficient, extensible, out-of-the-box PCAP analysis library — extract flow-level features and multi-layer protocol fields from network traffic captures"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 authors = [
     { name = "1in_js", email = "ljs_2002@163.com" },
 ]
@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ljs-2002/wa1kpcap"
-Repository = "https://github.com/ljs-2002/wa1kpcap"
-Issues = "https://github.com/ljs-2002/wa1kpcap/issues"
+Homepage = "https://github.com/ShituoMa/wa1kpcap"
+Repository = "https://github.com/ShituoMa/wa1kpcap"
+Issues = "https://github.com/ShituoMa/wa1kpcap/issues"
 
 [project.optional-dependencies]
 export = [
@@ -58,3 +58,4 @@ cmake.source-dir = "."
 
 [tool.scikit-build.cmake.define]
 BUILD_NATIVE = "ON"
+BUILD_NVERS = "ON"

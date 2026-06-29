@@ -30,9 +30,12 @@ set(NATIVE_SOURCES
 
 pybind11_add_module(_wa1kpcap_native ${NATIVE_SOURCES})
 
-target_link_libraries(_wa1kpcap_native PRIVATE yaml-cpp::yaml-cpp)
+target_link_libraries(_wa1kpcap_native PRIVATE yaml-cpp::yaml-cpp Python3::Module)
 
-target_include_directories(_wa1kpcap_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(_wa1kpcap_native PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${Python3_INCLUDE_DIRS}
+)
 
 # Install the module into the wa1kpcap package
 install(TARGETS _wa1kpcap_native DESTINATION wa1kpcap)

@@ -34,41 +34,64 @@ from wa1kpcap.exporters import (
     FlowExporter
 )
 
+try:
+    from wa1kpcap.extract import (
+        extract_all,
+        extract,
+        split_pcap,
+        list_features,
+        ExtractStats,
+        FeatureSpec,
+        read_jsonl,
+        extract_cic,
+        extract_cicext,
+        extract_seq,
+        extract_payload,
+        extract_tls,
+        extract_dns,
+        extract_vpn,
+        extract_im,
+        extract_flow,
+        extract_unified_seq,
+    )
+    from wa1kpcap.protocols import (
+        tls_features,
+        dns_features,
+        smtp_features,
+        dhcp_features,
+        ftp_features,
+        seq_features,
+        payload_features,
+        sequence_fields_union,
+        wa1k_nvers_seq_mapping,
+    )
+    _HAS_NVERS = True
+except ImportError:
+    _HAS_NVERS = False
+
 __version__ = "0.2.0"
 __author__ = "1in_js"
 
 __all__ = [
-    # Main class
     'Wa1kPcap',
-
-    # Core classes
-    'Flow',
-    'FlowKey',
-    'FlowManager',
-    'TCPState',
-    'ParsedPacket',
-    'Layer',
-    'ProtocolInfo',
-    'ProtocolRegistry',
+    'Flow', 'FlowKey', 'FlowManager', 'TCPState',
+    'ParsedPacket', 'Layer', 'ProtocolInfo', 'ProtocolRegistry',
     'PcapReader',
-
-    # Filtering
-    'PacketFilter',
-    'compile_filter',
-    'BPFCompiler',
-
-    # Feature extraction
-    'FeatureExtractor',
-    'FlowFeatures',
-    'FeatureType',
-    'register_feature',
-    'BaseIncrementalFeature',
-    'get_feature_registry',
-
-    # Exporters
-    'to_dataframe',
-    'to_dict',
-    'to_json',
-    'to_csv',
-    'FlowExporter',
+    'PacketFilter', 'compile_filter', 'BPFCompiler',
+    'FeatureExtractor', 'FlowFeatures', 'FeatureType',
+    'register_feature', 'BaseIncrementalFeature', 'get_feature_registry',
+    'to_dataframe', 'to_dict', 'to_json', 'to_csv', 'FlowExporter',
 ]
+
+if _HAS_NVERS:
+    __all__ += [
+        'extract_all', 'extract', 'split_pcap', 'list_features',
+        'ExtractStats', 'FeatureSpec', 'read_jsonl',
+        'extract_cic', 'extract_cicext', 'extract_seq',
+        'extract_payload', 'extract_tls', 'extract_dns',
+        'extract_vpn', 'extract_im', 'extract_flow',
+        'extract_unified_seq',
+        'tls_features', 'dns_features', 'smtp_features',
+        'dhcp_features', 'ftp_features', 'seq_features', 'payload_features',
+        'sequence_fields_union', 'wa1k_nvers_seq_mapping',
+    ]

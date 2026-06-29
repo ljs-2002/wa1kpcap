@@ -5,6 +5,8 @@ __pycache__/
 *.so
 .Python
 build/
+build_*/
+build_benchmark_tmp/
 develop-eggs/
 dist/
 downloads/
@@ -59,6 +61,7 @@ Makefile
 .DS_Store
 Thumbs.db
 nul
+src/cpp/nvers/build/
 
 # Data files
 *.pcap
@@ -72,6 +75,7 @@ benchmark*
 docs/*
 !docs/README.md
 !docs/README_CN.md
+!docs/API_EXTRACT_CN.md
 
 # Planning files
 task_plan.md
