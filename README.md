@@ -138,4 +138,5 @@ MIT License
 
 ## Author
 
-1in_js · maintained by [ShituoMa/wa1kpcap](https://github.com/ShituoMa/wa1kpcap)
+- Jiasheng Lin
+- Shituo Ma

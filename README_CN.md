@@ -136,4 +136,5 @@ MIT License
 
 ## 作者
 
-1in_js · 维护仓库：[ShituoMa/wa1kpcap](https://github.com/ShituoMa/wa1kpcap)
+- 林嘉胜
+- 马世拓
